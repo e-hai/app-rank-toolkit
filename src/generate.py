@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as C
 import locales as L
+import content as K
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,7 +45,8 @@ STYLE = (
     "table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:10px 8px;"
     "border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;"
     "letter-spacing:.04em}.note{color:var(--muted);font-size:.88rem}code{background:#f1f3f6;padding:2px 6px;"
-    "border-radius:5px}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
+    "border-radius:5px}.editorial{display:flex;gap:14px;flex-wrap:wrap;font-size:.88rem;margin:22px 0 8px}"
+    ".editorial a{color:var(--accent2)}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
     "margin:0 0 .4rem;color:var(--fg)}.prose p{color:var(--muted);margin:0}"
     "footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
     "color:var(--muted);font-size:.85rem}@media(max-width:640px){h1{font-size:2.2rem}.hero{padding:40px 0 30px}}"
@@ -244,10 +246,16 @@ def tool_prose(lang: str, slug: str) -> str:
     )
 
 
-def reference_table(lang: str, snapshot: dict) -> str:
+def reference_table(lang: str, snapshot: dict, prefix: str = "", base: str = "") -> str:
+    t = L.get(lang)
     rows = snapshot["markets"]["us"]["charts"]["free"]["rows"][:5]
     body = "".join(f'<tr><td>{esc(r["rank"])}</td><td>{esc(r["name"])}</td><td>{esc(r["developer"])}</td><td>{esc(r["rating"])}</td></tr>' for r in rows)
-    return f'<h2>{esc(L.get(lang)["source"])} · United States · {esc(L.get(lang)["free"])}</h2><table><thead><tr><th>#</th><th>App</th><th>Developer</th><th>Rating</th></tr></thead><tbody>{body}</tbody></table>'
+    head = (f'<th>{esc(t["col_rank"])}</th><th>{esc(t["col_app"])}</th>'
+            f'<th>{esc(t["col_developer"])}</th><th>{esc(t["col_rating"])}</th>')
+    link = f'<a href="{esc(base + prefix + "/markets/us/")}">{esc(C.market_name("us", lang))} →</a>'
+    return (f'<h2>{esc(t["source"])} · {esc(C.market_name("us", lang))} · {esc(t["free"])}</h2>'
+            f'<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+            f'<p class="note"><a href="{esc(base + prefix + "/markets/")}">{esc(t["markets_title"])} →</a> · {link}</p>')
 
 
 def bands_text() -> str:
@@ -326,6 +334,107 @@ def market_detail(lang: str, market: str, snapshot: dict) -> str | None:
     )
 
 
+def sections_html(sections) -> str:
+    return "".join(f'<section><h2>{esc(h)}</h2><p>{esc(p)}</p></section>' for h, p in sections)
+
+
+def editorial_nav(lang: str, prefix: str, base: str, exclude: str = "") -> str:
+    t = L.get(lang)
+    links = [
+        ("methodology", t["method_title"]),
+        ("markets", t["markets_title"]),
+        ("guides", K.GUIDES[lang]["guides_title"]),
+        ("about", K.ABOUT[lang]["title"]),
+        ("data", K.DATA[lang]["title"]),
+    ]
+    items = []
+    for path, label in links:
+        if path == exclude:
+            continue
+        items.append(f'<a href="{esc(base + prefix + "/" + path + "/")}">{esc(label)}</a>')
+    return '<nav class="editorial">' + " · ".join(items) + '</nav>'
+
+
+def about_page(lang: str, prefix: str, base: str) -> str:
+    c = K.ABOUT[lang]
+    t = L.get(lang)
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(c["title"])}</span>'
+        f'<h1>{esc(c["h1"])}</h1><p class="lead">{esc(c["sub"])}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "about")}'
+        f'<div class="prose">{sections_html(c["sections"])}</div>'
+        f'<p class="note">{esc(t["disclosure"])}</p></div>'
+    )
+
+
+def data_page(lang: str, prefix: str, base: str) -> str:
+    c = K.DATA[lang]
+    t = L.get(lang)
+    rows = "".join(
+        f'<tr><td><code>{esc(name)}</code></td><td>{esc(desc)}</td></tr>' for name, desc in K.FIELDS
+    )
+    field_table = (
+        f'<table><thead><tr><th>{esc(K.FIELD_LABELS[lang])}</th>'
+        f'<th>{esc(K.FIELD_DESC_LABELS[lang])}</th></tr></thead><tbody>{rows}</tbody></table>'
+    )
+    parts = []
+    for i, (h, p) in enumerate(c["sections"]):
+        parts.append(f'<section><h2>{esc(h)}</h2><p>{esc(p)}</p></section>')
+        if i == 1:
+            parts.append(f'<section><h2>{esc(K.FIELD_LABELS[lang])}</h2>{field_table}</section>')
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(c["title"])}</span>'
+        f'<h1>{esc(c["h1"])}</h1><p class="lead">{esc(c["sub"])}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "data")}'
+        f'<div class="prose">{"".join(parts)}</div>'
+        f'<p class="note">{esc(t["disclosure"])}</p></div>'
+    )
+
+
+def guides_index(lang: str, prefix: str, base: str) -> str:
+    c = K.GUIDES[lang]
+    cards = []
+    for slug in K.GUIDE_SLUGS:
+        g = c[slug]
+        cards.append(
+            f'<article class="card"><h3>{esc(g["title"])}</h3><p>{esc(g["desc"])}</p>'
+            f'<a href="guides/{slug}/">{esc(c["read_guide"])} →</a></article>'
+        )
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(c["guides_title"])}</span>'
+        f'<h1>{esc(c["guides_h1"])}</h1><p class="lead">{esc(c["guides_sub"])}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "guides")}'
+        f'<div class="grid">{"".join(cards)}</div></div>'
+    )
+
+
+def guide_detail(lang: str, slug: str, prefix: str, base: str) -> str | None:
+    c = K.GUIDES[lang]
+    if slug not in c:
+        return None
+    g = c[slug]
+    t = L.get(lang)
+    tool_link = {
+        "rank-bands": ("revenue-estimator", "rev_title"),
+        "fee-tiers": ("fee-calculator", "fee_title"),
+        "market-overlap": ("market-compare", "cmp_title"),
+        "charts-explained": (None, None),
+    }[slug]
+    related = [f'<a href="../">{esc(c["guides_h1"])}</a>',
+               f'<a href="{esc(base + prefix + "/methodology/")}">{esc(t["method_title"])}</a>']
+    if tool_link[0]:
+        related.insert(1, f'<a href="{esc(base + prefix + "/tools/" + tool_link[0] + "/")}">{esc(t[tool_link[1]])}</a>')
+    related.append(f'<a href="{esc(base + prefix + "/markets/")}">{esc(t["markets_title"])}</a>')
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(c["guides_title"])}</span>'
+        f'<h1>{esc(g["title"])}</h1><p class="lead">{esc(g["desc"])}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "guides")}'
+        f'<div class="prose">{sections_html(g["sections"])}</div>'
+        f'<h2>{esc(c["related_title"])}</h2><p>{" · ".join(related)}</p>'
+        f'<p class="note">{esc(t["disclosure"])}</p></div>'
+    )
+
+
 def build_site(snapshot: dict, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     base = C.BASE_URL
@@ -342,10 +451,21 @@ def build_site(snapshot: dict, out: Path) -> None:
                          "market-compare": "cmp_title", "fee-calculator": "fee_title"}[slug]
             href = base + prefix + f"/tools/{slug}/"
             cards.append(f'<article class="card"><span class="pill">{esc(t["tool_label"])}</span><h3>{esc(t[title_key])}</h3><p>{esc(t[desc_key])}</p><a href="{esc(href)}">{esc(t["open"])} →</a></article>')
+        gc = K.GUIDES[lang]
+        guide_cards = "".join(
+            f'<article class="card"><span class="pill">{esc(gc["guides_title"])}</span>'
+            f'<h3>{esc(gc[s]["title"])}</h3><p>{esc(gc[s]["desc"])}</p>'
+            f'<a href="{esc(base + prefix + "/guides/" + s + "/")}">{esc(gc["read_guide"])} →</a></article>'
+            for s in K.GUIDE_SLUGS[:2]
+        )
         body = (f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["home_eyebrow"])}</span>'
                 f'<h1>{esc(t["home_h1"])}</h1><p class="lead">{esc(t["home_sub"])}</p>'
                 f'<p class="note">{esc(t["data_fresh"].format(date=snapshot["date"]))} · <a href="{esc(base+prefix+"/methodology/")}">{esc(t["method_hint"])}</a></p></div></section>'
-                f'<div class="wrap"><div class="grid">{"".join(cards)}</div>{reference_table(lang, snapshot)}</div>')
+                f'<div class="wrap">{editorial_nav(lang, prefix, base)}'
+                f'<h2>{esc(t["tool_label"])}</h2><div class="grid">{"".join(cards)}</div>'
+                f'{reference_table(lang, snapshot, prefix, base)}'
+                f'<h2>{esc(gc["guides_title"])}</h2><div class="grid">{guide_cards}</div>'
+                f'<p class="note"><a href="{esc(base + prefix + "/guides/")}">{esc(gc["guides_h1"])} →</a></p></div>')
         schema = {"@context": "https://schema.org", "@type": "WebSite", "name": C.SITE_NAME,
                   "url": base + home_path, "publisher": {"@type": "Organization", "name": C.AUTHOR}}
         (out / home_path.strip("/") / "index.html").parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +523,35 @@ def build_site(snapshot: dict, out: Path) -> None:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(page(C.market_name(market, lang), t["market_sub"], detail_path, detail_body, lang, base), encoding="utf-8")
             paths.append(detail_path)
+
+        about_path = prefix + "/about/"
+        dest = out / about_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(K.ABOUT[lang]["title"], K.ABOUT[lang]["sub"], about_path, about_page(lang, prefix, base), lang, base), encoding="utf-8")
+        paths.append(about_path)
+
+        data_path = prefix + "/data/"
+        dest = out / data_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(K.DATA[lang]["title"], K.DATA[lang]["sub"], data_path, data_page(lang, prefix, base), lang, base), encoding="utf-8")
+        paths.append(data_path)
+
+        guides_path = prefix + "/guides/"
+        dest = out / guides_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(K.GUIDES[lang]["guides_title"], K.GUIDES[lang]["guides_sub"], guides_path, guides_index(lang, prefix, base), lang, base), encoding="utf-8")
+        paths.append(guides_path)
+
+        for slug in K.GUIDE_SLUGS:
+            guide_body = guide_detail(lang, slug, prefix, base)
+            if not guide_body:
+                continue
+            guide_path = prefix + f"/guides/{slug}/"
+            dest = out / guide_path.strip("/") / "index.html"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            g = K.GUIDES[lang][slug]
+            dest.write_text(page(g["title"], g["desc"], guide_path, guide_body, lang, base), encoding="utf-8")
+            paths.append(guide_path)
 
     lastmod = esc(snapshot.get("date", ""))
     sitemap = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']

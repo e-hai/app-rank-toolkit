@@ -45,8 +45,10 @@ class ToolkitTests(unittest.TestCase):
 
     def test_build_and_sitemap(self):
         out = self.build()
+        import content as K
         pages = list(out.rglob("index.html"))
-        expected = 5 * (6 + 1 + len(C.MARKETS))
+        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS)
+        expected = len(C.LANGS) * per_lang
         self.assertEqual(len(pages), expected)
         root = ET.parse(out / "sitemap.xml").getroot()
         urls = [x.text for x in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
@@ -58,8 +60,10 @@ class ToolkitTests(unittest.TestCase):
     def test_sitemap_lastmod(self):
         out = self.build()
         document = (out / "sitemap.xml").read_text(encoding="utf-8")
+        import content as K
         self.assertIn(f"<lastmod>{self.snapshot['date']}</lastmod>", document)
-        self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * (6 + 1 + len(C.MARKETS)))
+        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS)
+        self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * per_lang)
 
     def test_tool_prose(self):
         out = self.build()
@@ -84,6 +88,37 @@ class ToolkitTests(unittest.TestCase):
         zh = (out / "zh/markets/tw/index.html").read_text(encoding="utf-8")
         self.assertIn("热门应用", zh)
         self.assertIn("中国台湾", zh)
+
+    def test_about_and_data_pages(self):
+        import content as K
+        out = self.build()
+        about = (out / "about/index.html").read_text(encoding="utf-8")
+        self.assertIn("About AppRank Toolkit", about)
+        self.assertIn("apprank studio", about)
+        self.assertIn('class="editorial"', about)
+        data = (out / "data/index.html").read_text(encoding="utf-8")
+        self.assertIn("Data source and field dictionary", data)
+        for name, _ in K.FIELDS:
+            self.assertIn(f"<code>{name}</code>", data)
+        zh = (out / "zh/data/index.html").read_text(encoding="utf-8")
+        self.assertIn("字段字典", zh)
+
+    def test_guides_and_internal_links(self):
+        import content as K
+        out = self.build()
+        index = (out / "guides/index.html").read_text(encoding="utf-8")
+        self.assertIn("Guides and explainers", index)
+        for slug in K.GUIDE_SLUGS:
+            self.assertTrue((out / "guides" / slug / "index.html").exists())
+            self.assertIn(f'href="guides/{slug}/"', index)
+        guide = (out / "guides/rank-bands/index.html").read_text(encoding="utf-8")
+        self.assertIn("Understanding rank bands", guide)
+        self.assertIn("Related pages", guide)
+        self.assertIn("/tools/revenue-estimator/", guide)
+        self.assertIn("/markets/", guide)
+        home = (out / "index.html").read_text(encoding="utf-8")
+        self.assertIn("guides/rank-bands/", home)
+        self.assertIn("/markets/", home)
 
     def test_formula_single_source(self):
         rate = C.rank_multiplier(8)
