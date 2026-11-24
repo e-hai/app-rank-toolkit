@@ -13,15 +13,28 @@ import locales as L
 
 
 class ToolkitTests(unittest.TestCase):
-    def setUp(self):
-        self.snapshot = json.loads((G.ROOT / "data/snapshot.json").read_text(encoding="utf-8"))
+    _shared = None
+    _temp = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.snapshot = json.loads((G.ROOT / "data/snapshot.json").read_text(encoding="utf-8"))
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._temp is not None:
+            cls._temp.cleanup()
 
     def build(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        with patch.object(C, "BASE_URL", "https://toolkit.example"):
-            G.build_site(self.snapshot, Path(temp.name))
-        return Path(temp.name)
+        # Build once per class: the site now has 700+ pages, so rebuilding it
+        # for every test is slow and provides no extra coverage.
+        if ToolkitTests._shared is None:
+            temp = tempfile.TemporaryDirectory()
+            ToolkitTests._temp = temp
+            with patch.object(C, "BASE_URL", "https://toolkit.example"):
+                G.build_site(self.snapshot, Path(temp.name))
+            ToolkitTests._shared = Path(temp.name)
+        return ToolkitTests._shared
 
     def test_formulas(self):
         self.assertEqual(G.rank_result(None, 7), "new")
@@ -46,8 +59,10 @@ class ToolkitTests(unittest.TestCase):
     def test_build_and_sitemap(self):
         out = self.build()
         import content as K
+        app_pages = sum(1 for m, v in self.snapshot["markets"].items()
+                        for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         pages = list(out.rglob("index.html"))
-        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS)
+        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1 + app_pages
         expected = len(C.LANGS) * per_lang
         self.assertEqual(len(pages), expected)
         root = ET.parse(out / "sitemap.xml").getroot()
@@ -61,8 +76,10 @@ class ToolkitTests(unittest.TestCase):
         out = self.build()
         document = (out / "sitemap.xml").read_text(encoding="utf-8")
         import content as K
+        app_pages = sum(1 for m, v in self.snapshot["markets"].items()
+                        for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         self.assertIn(f"<lastmod>{self.snapshot['date']}</lastmod>", document)
-        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS)
+        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1 + app_pages
         self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * per_lang)
 
     def test_tool_prose(self):
@@ -119,6 +136,32 @@ class ToolkitTests(unittest.TestCase):
         home = (out / "index.html").read_text(encoding="utf-8")
         self.assertIn("guides/rank-bands/", home)
         self.assertIn("/markets/", home)
+
+    def test_movers_dashboard(self):
+        out = self.build()
+        doc = (out / "movers/index.html").read_text(encoding="utf-8")
+        self.assertIn("Biggest rank movers", doc)
+        self.assertIn("not an estimate", doc)
+        self.assertGreaterEqual(doc.count("<tr>"), 10)
+        self.assertIn('class="editorial"', doc)
+        self.assertIn("/apps/", doc)
+        zh = (out / "zh/movers/index.html").read_text(encoding="utf-8")
+        self.assertIn("波动最大的应用", zh)
+
+    def test_app_trend_pages(self):
+        out = self.build()
+        us = self.snapshot["markets"]["us"]["charts"]["free"]
+        app_id = next(a for a, pts in us["trend"].items() if pts)
+        path = out / "apps" / f"us-free-{app_id}" / "index.html"
+        self.assertTrue(path.exists())
+        doc = path.read_text(encoding="utf-8")
+        self.assertIn("<svg", doc)
+        self.assertIn("rank history", doc)
+        self.assertIn("14-day change", doc)
+        self.assertIn('hreflang="x-default"', doc)
+        # market table links into the trend page
+        market = (out / "markets/us/index.html").read_text(encoding="utf-8")
+        self.assertIn(f"/apps/us-free-{app_id}/", market)
 
     def test_formula_single_source(self):
         rate = C.rank_multiplier(8)

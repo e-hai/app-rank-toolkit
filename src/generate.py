@@ -258,6 +258,66 @@ def reference_table(lang: str, snapshot: dict, prefix: str = "", base: str = "")
             f'<p class="note"><a href="{esc(base + prefix + "/markets/")}">{esc(t["markets_title"])} →</a> · {link}</p>')
 
 
+def sparkline(points: list[dict], width: int = 560, height: int = 150) -> str:
+    """Render a rank-history line chart as inline SVG. Lower rank = higher on the chart."""
+    vals = [(p.get("date", ""), p.get("best_rank")) for p in points]
+    vals = [(d, v) for d, v in vals if v is not None]
+    if not vals:
+        return '<p class="note">—</p>'
+    ranks = [v for _, v in vals]
+    lo, hi = min(ranks), max(ranks)
+    if hi == lo:
+        hi = lo + 1
+    pad_l, pad_r, pad_t, pad_b = 34, 12, 12, 26
+    plot_w, plot_h = width - pad_l - pad_r, height - pad_t - pad_b
+    n = len(vals)
+    def xy(i, v):
+        x = pad_l + (plot_w * i / (n - 1) if n > 1 else plot_w / 2)
+        y = pad_t + (v - lo) / (hi - lo) * plot_h
+        return x, y
+    coords = [xy(i, v) for i, (_, v) in enumerate(vals)]
+    line = " ".join(f"{'M' if i == 0 else 'L'}{x:.1f},{y:.1f}" for i, (x, y) in enumerate(coords))
+    dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2.6" fill="#1f6feb"/>' for x, y in coords)
+    grid = (f'<line x1="{pad_l}" y1="{pad_t}" x2="{width-pad_r}" y2="{pad_t}" stroke="#dfe4ea"/>'
+            f'<line x1="{pad_l}" y1="{pad_t+plot_h}" x2="{width-pad_r}" y2="{pad_t+plot_h}" stroke="#dfe4ea"/>'
+            f'<text x="2" y="{pad_t+4}" font-size="10" fill="#5c6672">#{lo}</text>'
+            f'<text x="2" y="{pad_t+plot_h+4}" font-size="10" fill="#5c6672">#{hi}</text>')
+    first_date, last_date = vals[0][0], vals[-1][0]
+    labels = (f'<text x="{pad_l}" y="{height-4}" font-size="10" fill="#5c6672">{esc(first_date)}</text>'
+              f'<text x="{width-pad_r}" y="{height-4}" font-size="10" fill="#5c6672" text-anchor="end">{esc(last_date)}</text>')
+    return (f'<svg viewBox="0 0 {width} {height}" width="100%" role="img" '
+            f'aria-label="Rank history from {esc(first_date)} to {esc(last_date)}">'
+            f'{grid}<path d="{line}" fill="none" stroke="#1f6feb" stroke-width="2"/>{dots}{labels}</svg>')
+
+
+def rank_movers(snapshot: dict) -> list[dict]:
+    """Real 14-day movement per (market, chart, app): first vs last best_rank."""
+    out = []
+    for market, me in snapshot["markets"].items():
+        for chart, ch in me.get("charts", {}).items():
+            names = {r["app_id"]: r for r in ch.get("rows", [])}
+            for app_id, pts in ch.get("trend", {}).items():
+                clean = [p for p in pts if p.get("best_rank") is not None]
+                if len(clean) < 2:
+                    continue
+                first, last = clean[0]["best_rank"], clean[-1]["best_rank"]
+                best = min(p["best_rank"] for p in clean)
+                worst = max(p["best_rank"] for p in clean)
+                row = names.get(app_id, {})
+                out.append({
+                    "app_id": app_id, "name": row.get("name") or app_id,
+                    "developer": row.get("developer", ""), "market": market,
+                    "chart": chart, "first": first, "last": last,
+                    "delta": first - last, "best": best, "worst": worst,
+                    "swing": worst - best, "points": clean,
+                })
+    return out
+
+
+def app_slug(market: str, chart: str, app_id: str) -> str:
+    return f"{market}-{chart}-{app_id}"
+
+
 def bands_text() -> str:
     parts = [f"{ceil}→{mult}" for ceil, mult in C.RANK_BANDS]
     parts.append(f"worse→{C.FLOOR_MULTIPLIER}")
@@ -271,7 +331,8 @@ def move_label(prev, curr) -> str:
     return "up" if delta > 0 else "down" if delta < 0 else "flat"
 
 
-def chart_table(lang: str, rows: list[dict]) -> str:
+def chart_table(lang: str, rows: list[dict], market: str = "", chart: str = "",
+                prefix: str = "", base: str = "") -> str:
     t = L.get(lang)
     headers = ("col_rank", "col_app", "col_developer", "col_rating", "col_ratings", "col_price", "col_move")
     head = "".join(f'<th>{esc(t[h])}</th>' for h in headers)
@@ -282,8 +343,12 @@ def chart_table(lang: str, rows: list[dict]) -> str:
         price = t["price_free"] if not r.get("price") else f'{esc(r.get("price"))} {esc(r.get("currency", "USD"))}'
         rating = "—" if r.get("rating") in (None, "") else esc(r["rating"])
         count = "—" if r.get("rating_count") in (None, "") else esc(r["rating_count"])
+        name = esc(r.get("name"))
+        if market and chart and r.get("app_id"):
+            href = base + prefix + f"/apps/{app_slug(market, chart, r['app_id'])}/"
+            name = f'<a href="{esc(href)}">{name}</a>'
         body.append(
-            f'<tr><td>{esc(r.get("rank"))}</td><td>{esc(r.get("name"))}</td>'
+            f'<tr><td>{esc(r.get("rank"))}</td><td>{name}</td>'
             f'<td>{esc(r.get("developer"))}</td><td>{rating}</td><td>{count}</td>'
             f'<td>{price}</td><td>{esc(move_text)}</td></tr>'
         )
@@ -312,7 +377,8 @@ def market_index(lang: str, snapshot: dict) -> str:
     )
 
 
-def market_detail(lang: str, market: str, snapshot: dict) -> str | None:
+def market_detail(lang: str, market: str, snapshot: dict,
+                  prefix: str = "", base: str = "") -> str | None:
     entry = snapshot["markets"].get(market)
     if not entry:
         return None
@@ -323,7 +389,7 @@ def market_detail(lang: str, market: str, snapshot: dict) -> str | None:
         data = entry["charts"].get(chart)
         if not data or not data.get("rows"):
             continue
-        parts.append(f'<h2>{esc(t[chart])}</h2>' + chart_table(lang, data["rows"]))
+        parts.append(f'<h2>{esc(t[chart])}</h2>' + chart_table(lang, data["rows"], market, chart, prefix, base))
     return (
         f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["markets_title"])}</span>'
         f'<h1>{esc(t["market_h1"].format(market=name))}</h1>'
@@ -338,11 +404,85 @@ def sections_html(sections) -> str:
     return "".join(f'<section><h2>{esc(h)}</h2><p>{esc(p)}</p></section>' for h, p in sections)
 
 
+def movers_page(lang: str, snapshot: dict, prefix: str, base: str,
+                movers: list[dict] | None = None) -> str:
+    t = L.get(lang)
+    if movers is None:
+        movers = rank_movers(snapshot)
+    def section(title: str, items: list[dict]) -> str:
+        if not items:
+            return ""
+        rows = []
+        for m in items:
+            href = base + prefix + f"/apps/{app_slug(m['market'], m['chart'], m['app_id'])}/"
+            where = f"{esc(C.market_name(m['market'], lang))} · {esc(t['chart_free_label'] if m['chart']=='free' else t['chart_grossing_label'])}"
+            delta = m["delta"]
+            delta_text = f"+{delta}" if delta > 0 else str(delta)
+            rows.append(
+                f'<tr><td><a href="{esc(href)}">{esc(m["name"])}</a></td><td>{esc(m["developer"])}</td>'
+                f'<td>{esc(where)}</td><td>#{esc(m["best"])}</td><td>{esc(delta_text)}</td></tr>'
+            )
+        head = (f'<tr><th>{esc(t["col_app"])}</th><th>{esc(t["col_developer"])}</th>'
+                f'<th>{esc(t["markets_title"])}</th><th>{esc(t["col_best"])}</th>'
+                f'<th>{esc(t["col_change"])}</th></tr>')
+        return f'<h2>{esc(title)}</h2><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table>'
+    risers = sorted([m for m in movers if m["delta"] > 0], key=lambda m: -m["delta"])[:10]
+    fallers = sorted([m for m in movers if m["delta"] < 0], key=lambda m: m["delta"])[:10]
+    volatile = sorted(movers, key=lambda m: -m["swing"])[:10]
+    change = t["col_change"]
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["movers_title"])}</span>'
+        f'<h1>{esc(t["movers_h1"])}</h1><p class="lead">{esc(t["movers_sub"])}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "movers")}'
+        + section(t["move_up"] + " · " + change, risers)
+        + section(t["move_down"] + " · " + change, fallers)
+        + section(t["movers_h1"] + " · " + change, volatile)
+        + f'<p class="note">{esc(t["movers_note"].format(date=snapshot["date"]))}</p></div>'
+    )
+
+
+def trend_page(lang: str, market: str, chart: str, app_id: str,
+               snapshot: dict, prefix: str, base: str,
+               movers: list[dict] | None = None) -> str | None:
+    entry = snapshot["markets"].get(market, {}).get("charts", {}).get(chart)
+    if not entry:
+        return None
+    pts = entry.get("trend", {}).get(app_id)
+    if not pts:
+        return None
+    t = L.get(lang)
+    row = next((r for r in entry.get("rows", []) if r["app_id"] == app_id), {})
+    name = row.get("name") or app_id
+    developer = row.get("developer", "")
+    pool = movers if movers is not None else rank_movers(snapshot)
+    key = (app_id, market, chart)
+    index = {(m["app_id"], m["market"], m["chart"]): m for m in pool}
+    mover = index.get(key)
+    chart_label = t["chart_free_label"] if chart == "free" else t["chart_grossing_label"]
+    meta = []
+    if mover:
+        meta.append(f'{esc(t["col_best"])}: #{esc(mover["best"])}')
+        d = mover["delta"]
+        meta.append(f'{esc(t["col_change"])}: {esc("+"+str(d) if d>0 else str(d))}')
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["trend_title"])}</span>'
+        f'<h1>{esc(t["trend_h1"].format(app=name, market=C.market_name(market, lang)))}</h1>'
+        f'<p class="lead">{esc(t["trend_sub"].format(date=snapshot["date"]))}</p></div></section>'
+        f'<div class="wrap">{editorial_nav(lang, prefix, base, "movers")}'
+        f'<p class="note">{esc(chart_label)} · {esc(developer)} · {" · ".join(meta)}</p>'
+        f'<div class="card">{sparkline(pts)}</div>'
+        f'<p class="note">{esc(t["trend_note"])}</p>'
+        f'<p><a href="{esc(base + prefix + "/markets/" + market + "/")}">{esc(C.market_name(market, lang))} →</a> · '
+        f'<a href="{esc(base + prefix + "/movers/")}">{esc(t["back_movers"])} →</a></p></div>'
+    )
+
+
 def editorial_nav(lang: str, prefix: str, base: str, exclude: str = "") -> str:
     t = L.get(lang)
     links = [
         ("methodology", t["method_title"]),
         ("markets", t["markets_title"]),
+        ("movers", t["movers_title"]),
         ("guides", K.GUIDES[lang]["guides_title"]),
         ("about", K.ABOUT[lang]["title"]),
         ("data", K.DATA[lang]["title"]),
@@ -465,7 +605,8 @@ def build_site(snapshot: dict, out: Path) -> None:
                 f'<h2>{esc(t["tool_label"])}</h2><div class="grid">{"".join(cards)}</div>'
                 f'{reference_table(lang, snapshot, prefix, base)}'
                 f'<h2>{esc(gc["guides_title"])}</h2><div class="grid">{guide_cards}</div>'
-                f'<p class="note"><a href="{esc(base + prefix + "/guides/")}">{esc(gc["guides_h1"])} →</a></p></div>')
+                f'<p class="note"><a href="{esc(base + prefix + "/guides/")}">{esc(gc["guides_h1"])} →</a></p>'
+                f'<p class="note"><a href="{esc(base + prefix + "/movers/")}">{esc(t["movers_h1"])} →</a></p></div>')
         schema = {"@context": "https://schema.org", "@type": "WebSite", "name": C.SITE_NAME,
                   "url": base + home_path, "publisher": {"@type": "Organization", "name": C.AUTHOR}}
         (out / home_path.strip("/") / "index.html").parent.mkdir(parents=True, exist_ok=True)
@@ -515,7 +656,7 @@ def build_site(snapshot: dict, out: Path) -> None:
         paths.append(markets_path)
 
         for market in C.MARKETS:
-            detail_body = market_detail(lang, market, snapshot)
+            detail_body = market_detail(lang, market, snapshot, prefix, base)
             if not detail_body:
                 continue
             detail_path = prefix + f"/markets/{market}/"
@@ -523,6 +664,30 @@ def build_site(snapshot: dict, out: Path) -> None:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(page(C.market_name(market, lang), t["market_sub"], detail_path, detail_body, lang, base), encoding="utf-8")
             paths.append(detail_path)
+
+        movers_data = rank_movers(snapshot)
+        movers_path = prefix + "/movers/"
+        movers_body = movers_page(lang, snapshot, prefix, base, movers_data)
+
+        dest = out / movers_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(t["movers_title"], t["movers_sub"], movers_path, movers_body, lang, base), encoding="utf-8")
+        paths.append(movers_path)
+
+        for market, me in snapshot["markets"].items():
+            for chart, ch in me.get("charts", {}).items():
+                names = {r["app_id"]: r.get("name", "") for r in ch.get("rows", [])}
+                for app_id in ch.get("trend", {}):
+                    body = trend_page(lang, market, chart, app_id, snapshot, prefix, base, movers_data)
+                    if not body:
+                        continue
+                    slug = app_slug(market, chart, app_id)
+                    app_path = prefix + f"/apps/{slug}/"
+                    dest = out / app_path.strip("/") / "index.html"
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    title = names.get(app_id, app_id) + " — " + t["trend_title"]
+                    dest.write_text(page(title, t["trend_sub"], app_path, body, lang, base), encoding="utf-8")
+                    paths.append(app_path)
 
         about_path = prefix + "/about/"
         dest = out / about_path.strip("/") / "index.html"
