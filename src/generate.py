@@ -44,7 +44,9 @@ STYLE = (
     "table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:10px 8px;"
     "border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;"
     "letter-spacing:.04em}.note{color:var(--muted);font-size:.88rem}code{background:#f1f3f6;padding:2px 6px;"
-    "border-radius:5px}footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
+    "border-radius:5px}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
+    "margin:0 0 .4rem;color:var(--fg)}.prose p{color:var(--muted);margin:0}"
+    "footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
     "color:var(--muted);font-size:.85rem}@media(max-width:640px){h1{font-size:2.2rem}.hero{padding:40px 0 30px}}"
 )
 
@@ -54,7 +56,7 @@ const T=__T__;
 const CFG=__CFG__;
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n);
 const num=n=>new Intl.NumberFormat('en-US',{maximumFractionDigits:1}).format(n);
-function band(r){r=Number(r)||1;if(r<=1)return 1;if(r<=3)return .75;if(r<=10)return .45;if(r<=20)return .25;if(r<=30)return .12;return .05;}
+function band(r){r=Number(r)||1;const bands=CFG.rank_bands;for(const [ceil,mult] of bands){if(r<=ceil)return mult;}return CFG.floor;}
 function put(html){document.getElementById('result').innerHTML=html;}
 """
 
@@ -174,7 +176,7 @@ def rank_result(prev, curr) -> str:
 
 def revenue_scenario(rank: int, downloads_base: float, conversion: float,
                      price: float, fee_rate: float) -> dict:
-    mult = 1.0 if rank <= 1 else .75 if rank <= 3 else .45 if rank <= 10 else .25 if rank <= 20 else .12 if rank <= 30 else .05
+    mult = C.rank_multiplier(rank)
     downloads = downloads_base * mult
     paying = downloads * conversion / 100
     gross = paying * price
@@ -218,10 +220,110 @@ def form_html(lang: str, slug: str, snapshot: dict) -> str:
             f'<div><label>{esc(t["tier"])}</label><select id="tier">{opts}</select></div>{common}</form>')
 
 
+TOOL_COPY_KEYS = {
+    "rank-change": ("rank_how", "rank_use", "rank_ex", "rank_faq"),
+    "revenue-estimator": ("rev_how", "rev_use", "rev_ex", "rev_faq"),
+    "market-compare": ("cmp_how", "cmp_use", "cmp_ex", "cmp_faq"),
+    "fee-calculator": ("fee_how", "fee_use", "fee_ex", "fee_faq"),
+}
+
+
+def tool_prose(lang: str, slug: str) -> str:
+    t = L.get(lang)
+    how, use, ex, faq = TOOL_COPY_KEYS[slug]
+    def section(key: str, body: str) -> str:
+        return f'<section><h2>{esc(t[key])}</h2><p>{esc(body)}</p></section>'
+    return (
+        '<div class="prose">'
+        + section("what_title", t[how])
+        + section("use_title", t[use])
+        + section("example_title", t[ex])
+        + section("faq_title", t[faq])
+        + '<section><h2>' + esc(t["method_title"]) + '</h2><p>' + esc(t["limits_text"]) + '</p></section>'
+        + '</div>'
+    )
+
+
 def reference_table(lang: str, snapshot: dict) -> str:
     rows = snapshot["markets"]["us"]["charts"]["free"]["rows"][:5]
     body = "".join(f'<tr><td>{esc(r["rank"])}</td><td>{esc(r["name"])}</td><td>{esc(r["developer"])}</td><td>{esc(r["rating"])}</td></tr>' for r in rows)
     return f'<h2>{esc(L.get(lang)["source"])} · United States · {esc(L.get(lang)["free"])}</h2><table><thead><tr><th>#</th><th>App</th><th>Developer</th><th>Rating</th></tr></thead><tbody>{body}</tbody></table>'
+
+
+def bands_text() -> str:
+    parts = [f"{ceil}→{mult}" for ceil, mult in C.RANK_BANDS]
+    parts.append(f"worse→{C.FLOOR_MULTIPLIER}")
+    return ", ".join(parts)
+
+
+def move_label(prev, curr) -> str:
+    if prev in (None, "", 0):
+        return "new"
+    delta = int(prev) - int(curr)
+    return "up" if delta > 0 else "down" if delta < 0 else "flat"
+
+
+def chart_table(lang: str, rows: list[dict]) -> str:
+    t = L.get(lang)
+    headers = ("col_rank", "col_app", "col_developer", "col_rating", "col_ratings", "col_price", "col_move")
+    head = "".join(f'<th>{esc(t[h])}</th>' for h in headers)
+    body = []
+    for r in rows:
+        move = move_label(r.get("prev_rank"), r.get("rank"))
+        move_text = t["move_" + move]
+        price = t["price_free"] if not r.get("price") else f'{esc(r.get("price"))} {esc(r.get("currency", "USD"))}'
+        rating = "—" if r.get("rating") in (None, "") else esc(r["rating"])
+        count = "—" if r.get("rating_count") in (None, "") else esc(r["rating_count"])
+        body.append(
+            f'<tr><td>{esc(r.get("rank"))}</td><td>{esc(r.get("name"))}</td>'
+            f'<td>{esc(r.get("developer"))}</td><td>{rating}</td><td>{count}</td>'
+            f'<td>{price}</td><td>{esc(move_text)}</td></tr>'
+        )
+    return f'<table><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>'
+
+
+def market_index(lang: str, snapshot: dict) -> str:
+    t = L.get(lang)
+    cards = []
+    for m in C.MARKETS:
+        entry = snapshot["markets"].get(m)
+        if not entry:
+            continue
+        free = entry["charts"].get("free", {}).get("rows", [])
+        lead = esc(free[0]["name"]) if free else "—"
+        cards.append(
+            f'<article class="card"><span class="pill">{esc(C.market_name(m, lang))}</span>'
+            f'<h3>#1 · {lead}</h3><p>{esc(t["free"])} / {esc(t["grossing"])} · {esc(t["data_fresh"].format(date=snapshot["date"]))}</p>'
+            f'<a href="{m}/">{esc(t["open"])} →</a></article>'
+        )
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["markets_title"])}</span>'
+        f'<h1>{esc(t["markets_h1"])}</h1><p class="lead">{esc(t["markets_sub"])}</p></div></section>'
+        f'<div class="wrap"><p class="note">{esc(t["markets_intro"])}</p>'
+        f'<div class="grid">{"".join(cards)}</div></div>'
+    )
+
+
+def market_detail(lang: str, market: str, snapshot: dict) -> str | None:
+    entry = snapshot["markets"].get(market)
+    if not entry:
+        return None
+    t = L.get(lang)
+    name = C.market_name(market, lang)
+    parts = []
+    for chart in C.CHARTS:
+        data = entry["charts"].get(chart)
+        if not data or not data.get("rows"):
+            continue
+        parts.append(f'<h2>{esc(t[chart])}</h2>' + chart_table(lang, data["rows"]))
+    return (
+        f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["markets_title"])}</span>'
+        f'<h1>{esc(t["market_h1"].format(market=name))}</h1>'
+        f'<p class="lead">{esc(t["market_sub"].format(date=snapshot["date"]))}</p></div></section>'
+        f'<div class="wrap"><p><a href="../">{esc("← " + t["back_markets"])}</a></p>'
+        f'{"".join(parts)}'
+        f'<p class="note">{esc(t["market_note"].format(date=snapshot["date"]))}</p></div>'
+    )
 
 
 def build_site(snapshot: dict, out: Path) -> None:
@@ -260,9 +362,10 @@ def build_site(snapshot: dict, out: Path) -> None:
             body = (f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["tool_label"])}</span>'
                     f'<h1>{esc(t[title_key])}</h1><p class="lead">{esc(t[desc_key])}</p></div></section>'
                     f'<div class="wrap"><div class="card">{form_html(lang, slug, snapshot)}<div id="result" class="result"></div>'
-                    f'<p class="note">{esc(t["scenario_note"])}</p></div><p class="note">{esc(t["disclosure"])}</p></div>')
+                    f'<p class="note">{esc(t["scenario_note"])}</p></div>'
+                    f'{tool_prose(lang, slug)}<p class="note">{esc(t["disclosure"])}</p></div>')
             script = JS[slug].replace("__DATA__", script_json(snapshot)).replace("__T__", script_json(t)).replace(
-                "__CFG__", script_json({"fees": C.FEE_RATES}))
+                "__CFG__", script_json({"fees": C.FEE_RATES, "rank_bands": C.RANK_BANDS, "floor": C.FLOOR_MULTIPLIER}))
             schema = {"@context": "https://schema.org", "@type": "WebApplication", "name": t[title_key],
                       "url": base + tool_path, "applicationCategory": "UtilitiesApplication",
                       "operatingSystem": "Any", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
@@ -276,7 +379,7 @@ def build_site(snapshot: dict, out: Path) -> None:
         method_body = (f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["method_title"])}</span>'
                        f'<h1>{esc(t["method_title"])}</h1><p class="lead">{esc(t["method_desc"])}</p></div></section>'
                        f'<div class="wrap"><div class="card"><h2>1. {esc(t["source"])}</h2><p><a href="{esc(C.API_BASE)}">{esc(C.API_BASE)}</a></p>'
-                       f'<h2>2. Rank bands</h2><p><code>1→1.0, 3→0.75, 10→0.45, 20→0.25, 30→0.12, worse→0.05</code></p>'
+                       f'<h2>2. Rank bands</h2><p><code>{esc(bands_text())}</code></p>'
                        f'<h2>3. Revenue</h2><p><code>gross = downloads × multiplier × conversion × price</code>; <code>net = gross × (1 - fee)</code></p>'
                        f'<h2>4. Limits</h2><p>{esc(t["scenario_note"])}</p></div></div>')
         dest = out / method_path.strip("/") / "index.html"
@@ -284,8 +387,26 @@ def build_site(snapshot: dict, out: Path) -> None:
         dest.write_text(page(t["method_title"], t["method_desc"], method_path, method_body, lang, base), encoding="utf-8")
         paths.append(method_path)
 
+        markets_path = prefix + "/markets/"
+        markets_body = market_index(lang, snapshot)
+        dest = out / markets_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(t["markets_title"], t["markets_sub"], markets_path, markets_body, lang, base), encoding="utf-8")
+        paths.append(markets_path)
+
+        for market in C.MARKETS:
+            detail_body = market_detail(lang, market, snapshot)
+            if not detail_body:
+                continue
+            detail_path = prefix + f"/markets/{market}/"
+            dest = out / detail_path.strip("/") / "index.html"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(page(C.market_name(market, lang), t["market_sub"], detail_path, detail_body, lang, base), encoding="utf-8")
+            paths.append(detail_path)
+
+    lastmod = esc(snapshot.get("date", ""))
     sitemap = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    sitemap += [f"  <url><loc>{esc(base + p)}</loc></url>" for p in paths]
+    sitemap += [f"  <url><loc>{esc(base + p)}</loc><lastmod>{lastmod}</lastmod></url>" for p in paths]
     sitemap.append("</urlset>")
     (out / "sitemap.xml").write_text("\n".join(sitemap) + "\n", encoding="utf-8")
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n", encoding="utf-8")

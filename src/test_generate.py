@@ -35,7 +35,7 @@ class ToolkitTests(unittest.TestCase):
         self.assertEqual(G.fee_scenario(100, .15)["net"], 85)
 
     def test_snapshot_shape(self):
-        self.assertEqual(self.snapshot["date"], "2026-11-23")
+        self.assertRegex(self.snapshot["date"], r"^\d{4}-\d{2}-\d{2}$")
         for market in C.MARKETS:
             self.assertIn(market, self.snapshot["markets"])
             for chart in C.CHARTS:
@@ -46,13 +46,56 @@ class ToolkitTests(unittest.TestCase):
     def test_build_and_sitemap(self):
         out = self.build()
         pages = list(out.rglob("index.html"))
-        self.assertEqual(len(pages), 30)
+        expected = 5 * (6 + 1 + len(C.MARKETS))
+        self.assertEqual(len(pages), expected)
         root = ET.parse(out / "sitemap.xml").getroot()
         urls = [x.text for x in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
-        self.assertEqual(len(urls), 30)
+        self.assertEqual(len(urls), expected)
         for url in urls:
             path = urlparse(url).path.strip("/")
             self.assertTrue((out / path / "index.html").exists())
+
+    def test_sitemap_lastmod(self):
+        out = self.build()
+        document = (out / "sitemap.xml").read_text(encoding="utf-8")
+        self.assertIn(f"<lastmod>{self.snapshot['date']}</lastmod>", document)
+        self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * (6 + 1 + len(C.MARKETS)))
+
+    def test_tool_prose(self):
+        out = self.build()
+        document = (out / "tools/rank-change/index.html").read_text(encoding="utf-8")
+        self.assertIn('class="prose"', document)
+        self.assertIn("How this tool works", document)
+        self.assertIn("Worked example", document)
+        self.assertIn("Common questions", document)
+
+    def test_market_pages(self):
+        out = self.build()
+        index = (out / "markets/index.html").read_text(encoding="utf-8")
+        self.assertIn("App Store rankings by market", index)
+        for market in C.MARKETS:
+            self.assertTrue((out / "markets" / market / "index.html").exists())
+            self.assertIn(f'href="{market}/"', index)
+        us = (out / "markets/us/index.html").read_text(encoding="utf-8")
+        self.assertIn("Top apps in United States", us)
+        self.assertIn("<table>", us)
+        self.assertIn("TikTok", us)
+        self.assertIn('hreflang="x-default"', us)
+        zh = (out / "zh/markets/tw/index.html").read_text(encoding="utf-8")
+        self.assertIn("热门应用", zh)
+        self.assertIn("中国台湾", zh)
+
+    def test_formula_single_source(self):
+        rate = C.rank_multiplier(8)
+        self.assertEqual(rate, 0.45)
+        self.assertEqual(rate, C.rank_multiplier(10))
+        self.assertEqual(C.rank_multiplier(11), 0.25)
+        self.assertEqual(C.rank_multiplier(31), C.FLOOR_MULTIPLIER)
+        self.assertEqual(G.revenue_scenario(8, 10000, 100, 1, 0)["multiplier"], rate)
+        out = self.build()
+        document = (out / "tools/revenue-estimator/index.html").read_text(encoding="utf-8")
+        self.assertIn("CFG.rank_bands", document)
+        self.assertIn('"rank_bands": [[1, 1.0]', document)
 
     def test_hreflang_and_canonical(self):
         out = self.build()

@@ -52,6 +52,24 @@ TOOLS = ("rank-change", "revenue-estimator", "market-compare", "fee-calculator")
 # Free App Store / Google Play fee scenarios. These are assumptions, not billing advice.
 FEE_RATES = {"standard": 0.30, "small": 0.15}
 
+# Rank-band download multipliers. Single source of truth: the Python estimator and
+# the browser JavaScript both read these values (JS receives them via injected CFG).
+RANK_BANDS = ((1, 1.0), (3, 0.75), (10, 0.45), (20, 0.25), (30, 0.12))
+FLOOR_MULTIPLIER = 0.05
+
+
+def rank_multiplier(rank) -> float:
+    try:
+        r = int(rank)
+    except (TypeError, ValueError):
+        r = 1
+    if r < 1:
+        r = 1
+    for ceiling, multiplier in RANK_BANDS:
+        if r <= ceiling:
+            return multiplier
+    return FLOOR_MULTIPLIER
+
 
 def market_name(code: str, lang: str = "en") -> str:
     if lang in LOCAL_MARKET_NAMES and code in LOCAL_MARKET_NAMES[lang]:
