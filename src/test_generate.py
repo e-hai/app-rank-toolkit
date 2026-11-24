@@ -163,6 +163,19 @@ class ToolkitTests(unittest.TestCase):
         market = (out / "markets/us/index.html").read_text(encoding="utf-8")
         self.assertIn(f"/apps/us-free-{app_id}/", market)
 
+    def test_social_meta_and_dataset_schema(self):
+        out = self.build()
+        doc = (out / "tools/fee-calculator/index.html").read_text(encoding="utf-8")
+        self.assertIn('property="og:title"', doc)
+        self.assertIn('property="og:locale" content="en"', doc)
+        self.assertIn('name="twitter:card" content="summary"', doc)
+        app = next((out / "apps").glob("us-free-*/index.html"))
+        t = app.read_text(encoding="utf-8")
+        self.assertIn('"@type": "Dataset"', t)
+        self.assertIn('"temporalCoverage": "2026-11-23"', t)
+        m = (out / "movers/index.html").read_text(encoding="utf-8")
+        self.assertIn('"@type": "Dataset"', m)
+
     def test_formula_single_source(self):
         rate = C.rank_multiplier(8)
         self.assertEqual(rate, 0.45)

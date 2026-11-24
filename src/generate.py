@@ -153,6 +153,15 @@ def page(title: str, description: str, path: str, body: str, lang: str,
 <meta name="description" content="{esc(description)}"/>
 <meta name="robots" content="index,follow"/>
 <link rel="canonical" href="{esc(base + path)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="{esc(C.SITE_NAME)}"/>
+<meta property="og:title" content="{esc(title)}"/>
+<meta property="og:description" content="{esc(description)}"/>
+<meta property="og:url" content="{esc(base + path)}"/>
+<meta property="og:locale" content="{esc(C.HREFLANG.get(lang, lang).replace('-', '_'))}"/>
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="{esc(title)}"/>
+<meta name="twitter:description" content="{esc(description)}"/>
 {alts}
 <style>{STYLE}</style>
 {ld}
@@ -671,7 +680,12 @@ def build_site(snapshot: dict, out: Path) -> None:
 
         dest = out / movers_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(page(t["movers_title"], t["movers_sub"], movers_path, movers_body, lang, base), encoding="utf-8")
+        movers_schema = {"@context": "https://schema.org", "@type": "Dataset",
+                         "name": t["movers_h1"], "url": base + movers_path,
+                         "temporalCoverage": snapshot["date"],
+                         "creator": {"@type": "Organization", "name": C.AUTHOR},
+                         "isAccessibleForFree": True, "sameAs": C.API_BASE}
+        dest.write_text(page(t["movers_title"], t["movers_sub"], movers_path, movers_body, lang, base, schema=movers_schema), encoding="utf-8")
         paths.append(movers_path)
 
         for market, me in snapshot["markets"].items():
@@ -686,7 +700,13 @@ def build_site(snapshot: dict, out: Path) -> None:
                     dest = out / app_path.strip("/") / "index.html"
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     title = names.get(app_id, app_id) + " — " + t["trend_title"]
-                    dest.write_text(page(title, t["trend_sub"], app_path, body, lang, base), encoding="utf-8")
+                    schema = {"@context": "https://schema.org", "@type": "Dataset",
+                              "name": title, "url": base + app_path,
+                              "temporalCoverage": snapshot["date"],
+                              "creator": {"@type": "Organization", "name": C.AUTHOR},
+                              "isAccessibleForFree": True,
+                              "sameAs": C.API_BASE}
+                    dest.write_text(page(title, t["trend_sub"], app_path, body, lang, base, schema=schema), encoding="utf-8")
                     paths.append(app_path)
 
         about_path = prefix + "/about/"
