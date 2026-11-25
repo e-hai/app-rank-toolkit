@@ -35,7 +35,7 @@ python3 -m unittest discover -s src -p 'test_*.py' -v
 
 托管在 Cloudflare Pages 免费 `pages.dev` 域名，不使用 GitHub Pages。
 
-- GitHub 仓库：`e-hai/apprank-toolkit`
+- GitHub 仓库：`e-hai/seo-app-rank-toolkit`
 - Cloudflare Pages 项目：`apprank-toolkit`
 - 默认线上域名：`https://apprank-toolkit.pages.dev`
 
