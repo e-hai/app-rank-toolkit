@@ -70,3 +70,5 @@ npm run test:e2e     # 真实 Chrome 跑四个计算器（需先 build）
 4. `gh secret set CF_WA_TOKEN -R e-hai/seo-app-rank-toolkit`（或写到仓库 Secrets 页）
 
 配置后 `src/config.py` 读取 `CF_WA_TOKEN`，生成时给每页尾部注入一行 beacon 脚本；未配置则完全不输出，不会留下空标签。金额与页面结构不受影响。
+
+已开启（2026-11-25）：站点 `apprank-toolkit.pages.dev` 已在 Web Analytics 中创建，令牌存于仓库 secret `CF_WA_TOKEN`，线上每页尾部都有 beacon 脚本。数据无 cookie、不采集个人信息。
