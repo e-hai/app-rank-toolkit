@@ -39,6 +39,12 @@ STYLE = (
     "form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:18px}"
     "label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:5px}input,select{width:100%;"
     "padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;font:inherit}"
+    ".actions{grid-column:1/-1;display:flex;gap:10px}.actions button{flex:1;grid-column:auto}"
+    ".ghost{background:#fff!important;color:var(--fg)!important;border:1px solid var(--line)!important}"
+    ".res-head{margin:0 0 10px;font-size:1rem}.bad{color:#b42318;margin:0;font-weight:600}"
+    ".result table.res{font-size:.92rem}.result table.res td{border-bottom:1px solid var(--line);padding:8px 6px}"
+    ".result table.res td:last-child{text-align:right;font-variant-numeric:tabular-nums}"
+    ".result h3{font-size:.95rem;margin:14px 0 6px}"
     "button{grid-column:1/-1;border:0;background:var(--accent);color:#fff;border-radius:9px;padding:12px 16px;"
     "font:inherit;font-weight:700;cursor:pointer}.result{margin-top:20px;padding:18px;border-radius:10px;"
     "background:var(--soft);border:1px solid #cfe0ff;min-height:58px;font-weight:600}"
@@ -61,35 +67,53 @@ const CFG=__CFG__;
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n);
 const num=n=>new Intl.NumberFormat('en-US',{maximumFractionDigits:1}).format(n);
 function band(r){r=Number(r)||1;const bands=CFG.rank_bands;for(const [ceil,mult] of bands){if(r<=ceil)return mult;}return CFG.floor;}
-function put(html){document.getElementById('result').innerHTML=html;}
+const foot='<p class="note"><a href="'+CFG.method+'">'+T.method_title+'</a></p>';
+function put(html){document.getElementById('result').innerHTML=html+foot;}
+const row=(k,v)=>'<tr><td>'+k+'</td><td>'+v+'</td></tr>';
+const tbl=rows=>'<table class="res">'+rows+'</table>';
+const bad=m=>'<p class="bad">'+m+'</p>';
+const head=m=>'<p class="res-head">'+m+'</p>';
+const val=id=>{const s=document.getElementById(id).value.trim();return s===''?NaN:Number(s);};
+function bind(run){const f=document.getElementById('tool-form');
+f.addEventListener('submit',e=>{e.preventDefault();run();});
+f.addEventListener('reset',()=>setTimeout(run,0));run();}
 """
 
 JS = {
     "rank-change": JS_HEAD + """
-function run(){const p=Number(document.getElementById('prev').value);const c=Number(document.getElementById('curr').value);
-if(!p||!c){put(T.scenario_note);return;}const d=p-c;let msg=d>0?T.improved.replace('{n}',d):d<0?T.declined.replace('{n}',Math.abs(d)):T.no_change;put(T.result+': '+msg);}
-document.getElementById('tool-form').addEventListener('submit',e=>{e.preventDefault();run();});run();
+function run(){const p=val('prev'),c=val('curr');
+if(!(p>=1)||!(c>=1)){put(bad(T.invalid_input));return;}
+const d=p-c,msg=d>0?T.improved.replace('{n}',d):d<0?T.declined.replace('{n}',Math.abs(d)):T.no_change;
+const mb=band(p),mc=band(c);
+put(head(T.result+': '+msg)+tbl(row(T.band_multiplier,mb+' \u2192 '+mc)+row(T.visibility,(mc/mb).toFixed(2)+'\u00d7')));}
+bind(run);
 """,
     "revenue-estimator": JS_HEAD + """
-function run(){const rank=Number(document.getElementById('rank').value)||1;const base=Number(document.getElementById('downloads').value)||0;
-const conv=Number(document.getElementById('conversion').value)||0;const price=Number(document.getElementById('price').value)||0;
-const tier=document.getElementById('tier').value;const rate=CFG.fees[tier];const downloads=base*band(rank);const paying=downloads*conv/100;
-const gross=paying*price;const net=gross*(1-rate);put(T.gross+': '+money(gross)+' · '+T.net+': '+money(net)+'<br><span class="note">'+T.scenario_note+'</span>');}
-document.getElementById('tool-form').addEventListener('submit',e=>{e.preventDefault();run();});run();
+function run(){const rank=val('rank'),base=val('downloads'),conv=val('conversion'),price=val('price');
+if(!(rank>=1)||!(conv>=0)||!(conv<=100)||!(base>=0)){put(bad(T.invalid_input));return;}
+const rate=CFG.fees[document.getElementById('tier').value];
+const downloads=base*band(rank),paying=downloads*conv/100,gross=paying*price,fee=gross*rate,net=gross-fee;
+put(head(T.net+': '+money(net))+tbl(row(T.downloads_after,num(downloads))+row(T.paying_users,num(paying))+row(T.gross,money(gross))+row(T.fee_amount,money(fee))+row(T.arpu,money(downloads?gross/downloads:0))));}
+bind(run);
 """,
     "market-compare": JS_HEAD + """
 function run(){const a=document.getElementById('a').value,b=document.getElementById('b').value,ch=document.getElementById('chart').value;
-const ra=DATA.markets[a].charts[ch].rows,rb=DATA.markets[b].charts[ch].rows;
-const ids=new Set(ra.map(r=>r.app_id));const shared=rb.filter(r=>ids.has(r.app_id));
-const names=shared.length?shared.map(r=>htmlEscape(r.name)).join(', '):T.no_overlap;
-put(T.overlap+': '+shared.length+'/10<br>'+T.shared_apps+': '+names);}
+const ma=DATA.markets[a]&&DATA.markets[a].charts[ch],mb=DATA.markets[b]&&DATA.markets[b].charts[ch];
+if(!ma||!mb){put(bad(T.invalid_input));return;}
+const ra=ma.rows,rb=mb.rows,ids=new Set(ra.map(r=>r.app_id));
+const shared=rb.filter(r=>ids.has(r.app_id));
+const rows=shared.slice(0,10).map(r=>{const o=ra.find(x=>x.app_id===r.app_id);return row(htmlEscape(r.name),'#'+o.rank+' \u2192 #'+r.rank);}).join('');
+put(head(T.overlap+': '+shared.length+'/10')+(rows?'<table class="res">'+rows+'</table>':bad(T.no_overlap)));}
 function htmlEscape(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-document.getElementById('tool-form').addEventListener('submit',e=>{e.preventDefault();run();});run();
+bind(run);
 """,
     "fee-calculator": JS_HEAD + """
-function run(){const gross=Number(document.getElementById('gross').value)||0;const tier=document.getElementById('tier').value;
-const rate=CFG.fees[tier];const net=gross*(1-rate);put(T.fee_gross+': '+money(gross)+' · '+T.net_revenue+': '+money(net));}
-document.getElementById('tool-form').addEventListener('submit',e=>{e.preventDefault();run();});run();
+function run(){const gross=val('gross');
+if(!(gross>=0)){put(bad(T.invalid_input));return;}
+const rate=CFG.fees[document.getElementById('tier').value],fee=gross*rate,net=gross-fee;
+const cmp=Object.entries(CFG.fees).map(([k,r])=>row(T[k],money(gross*(1-r)))).join('');
+put(head(T.net_revenue+': '+money(net))+tbl(row(T.fee_gross,money(gross))+row(T.fee_amount,money(fee)))+'<h3>'+T.tier_compare+'</h3>'+tbl(cmp));}
+bind(run);
 """,
 }
 
@@ -263,26 +287,39 @@ def fee_scenario(gross: float, fee_rate: float) -> dict:
 
 def form_html(lang: str, slug: str, snapshot: dict) -> str:
     t = L.get(lang)
-    common = f'<button type="submit">{esc(t["calculate"])}</button>'
+    actions = (f'<div class="actions"><button type="submit">{esc(t["calculate"])}</button>'
+               f'<button type="reset" class="ghost">{esc(t["reset_label"])}</button></div>')
+    noscript = f'<noscript><p class="note">{esc(t["fallback"])}</p></noscript>'
     if slug == "rank-change":
-        return f'<form id="tool-form"><div><label>{esc(t["prev_rank"])}</label><input id="prev" type="number" min="1" value="12"/></div><div><label>{esc(t["curr_rank"])}</label><input id="curr" type="number" min="1" value="7"/></div>{common}</form>'
+        return (f'<form id="tool-form">'
+                f'<div><label for="prev">{esc(t["prev_rank"])}</label><input id="prev" name="prev" type="number" min="1" step="1" value="12"/></div>'
+                f'<div><label for="curr">{esc(t["curr_rank"])}</label><input id="curr" name="curr" type="number" min="1" step="1" value="7"/></div>'
+                f'{actions}</form>{noscript}')
     if slug == "revenue-estimator":
-        opts = "".join(f'<option value="{key}">{esc(val)}</option>' for key, val in C.FEE_RATES.items())
-        return (f'<form id="tool-form"><div><label>{esc(t["rank_band"])}</label><input id="rank" type="number" min="1" value="8"/></div>'
-                f'<div><label>{esc(t["downloads"])}</label><input id="downloads" type="number" min="0" value="50000"/></div>'
-                f'<div><label>{esc(t["conversion"])}</label><input id="conversion" type="number" min="0" max="100" value="4"/></div>'
-                f'<div><label>{esc(t["price"])}</label><input id="price" type="number" min="0" step="0.01" value="4.99"/></div>'
-                f'<div><label>{esc(t["tier"])}</label><select id="tier">{opts}</select></div>{common}</form>')
+        opts = "".join(f'<option value="{key}">{esc(t[key])}</option>' for key in C.FEE_RATES)
+        return (f'<form id="tool-form"><div><label for="rank">{esc(t["rank_band"])}</label>'
+                f'<input id="rank" name="rank" type="number" min="1" step="1" value="8"/></div>'
+                f'<div><label for="downloads">{esc(t["downloads"])}</label>'
+                f'<input id="downloads" name="downloads" type="number" min="0" step="1000" value="50000"/></div>'
+                f'<div><label for="conversion">{esc(t["conversion"])}</label>'
+                f'<input id="conversion" name="conversion" type="number" min="0" max="100" step="0.1" value="4"/></div>'
+                f'<div><label for="price">{esc(t["price"])}</label>'
+                f'<input id="price" name="price" type="number" min="0" step="0.01" value="4.99"/></div>'
+                f'<div><label for="tier">{esc(t["tier"])}</label><select id="tier" name="tier">{opts}</select></div>'
+                f'{actions}</form>{noscript}')
     if slug == "market-compare":
         markets = "".join(f'<option value="{m}">{esc(C.market_name(m, lang))}</option>' for m in C.MARKETS)
         markets_b = "".join(f'<option value="{m}">{esc(C.market_name(m, lang))}</option>' for m in C.MARKETS if m != "gb")
         charts = "".join(f'<option value="{c}">{esc(t[c])}</option>' for c in C.CHARTS)
-        return (f'<form id="tool-form"><div><label>{esc(t["market_a"])}</label><select id="a">{markets}</select></div>'
-                f'<div><label>{esc(t["market_b"])}</label><select id="b"><option value="gb">{esc(C.market_name("gb", lang))}</option>{markets_b}</select></div>'
-                f'<div><label>{esc(t["chart"])}</label><select id="chart">{charts}</select></div>{common}</form>')
+        return (f'<form id="tool-form"><div><label for="a">{esc(t["market_a"])}</label><select id="a" name="a">{markets}</select></div>'
+                f'<div><label for="b">{esc(t["market_b"])}</label><select id="b" name="b"><option value="gb">{esc(C.market_name("gb", lang))}</option>{markets_b}</select></div>'
+                f'<div><label for="chart">{esc(t["chart"])}</label><select id="chart" name="chart">{charts}</select></div>'
+                f'{actions}</form>{noscript}')
     opts = "".join(f'<option value="{key}">{esc(t[key])}</option>' for key in C.FEE_RATES)
-    return (f'<form id="tool-form"><div><label>{esc(t["fee_gross"])}</label><input id="gross" type="number" min="0" step="0.01" value="10000"/></div>'
-            f'<div><label>{esc(t["tier"])}</label><select id="tier">{opts}</select></div>{common}</form>')
+    return (f'<form id="tool-form"><div><label for="gross">{esc(t["fee_gross"])}</label>'
+            f'<input id="gross" name="gross" type="number" min="0" step="0.01" value="10000"/></div>'
+            f'<div><label for="tier">{esc(t["tier"])}</label><select id="tier" name="tier">{opts}</select></div>'
+            f'{actions}</form>{noscript}')
 
 
 TOOL_COPY_KEYS = {
@@ -728,20 +765,22 @@ def build_site(snapshot: dict, out: Path) -> None:
                     + f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["tool_label"])}</span>'
                     f'<h1>{esc(t[title_key])}</h1><p class="lead">{esc(t[desc_key])}</p>'
                     f'<p class="note">{esc(t["data_fresh"].format(date=snapshot["date"]))}</p></div></section>'
-                    f'<div class="wrap"><div class="card">{form_html(lang, slug, snapshot)}<div id="result" class="result"></div>'
+                    f'<div class="wrap"><div class="card">{form_html(lang, slug, snapshot)}<div id="result" class="result" role="status" aria-live="polite"></div>'
                     f'<p class="note">{esc(t["scenario_note"])}</p></div>'
                     f'{tool_prose(lang, slug)}'
                     f'{related_tools(lang, prefix, base, slug)}'
                     f'<p class="note">{esc(t["disclosure"])}</p></div>')
             if slug == "market-compare":
                 mini = {"markets": {m: {"charts": {c: {"rows": [
-                    {"app_id": r["app_id"], "name": r.get("name", "")} for r in ch.get("rows", [])]}
+                    {"app_id": r["app_id"], "name": r.get("name", ""), "rank": r.get("rank")}
+                    for r in ch.get("rows", [])]}
                     for c, ch in me.get("charts", {}).items()}} for m, me in snapshot["markets"].items()}}
                 payload = script_json(mini)
             else:
                 payload = "{}"
             script = JS[slug].replace("__DATA__", payload).replace("__T__", script_json(t)).replace(
-                "__CFG__", script_json({"fees": C.FEE_RATES, "rank_bands": C.RANK_BANDS, "floor": C.FLOOR_MULTIPLIER}))
+                "__CFG__", script_json({"fees": C.FEE_RATES, "rank_bands": C.RANK_BANDS,
+                                    "floor": C.FLOOR_MULTIPLIER, "method": prefix + "/methodology/"}))
             schema = [{"@context": "https://schema.org", "@type": "WebApplication", "name": t[title_key],
                        "url": base + tool_path, "applicationCategory": "UtilitiesApplication",
                        "operatingSystem": "Any", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},

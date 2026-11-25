@@ -119,6 +119,22 @@ class ToolkitTests(unittest.TestCase):
             document = (out / path / "index.html").read_text(encoding="utf-8")
             self.assertIn('class="crumbs"', document, path)
 
+
+    def test_calculator_usability_markup(self):
+        out = self.build()
+        for slug in C.TOOLS:
+            document = (out / "tools" / slug / "index.html").read_text(encoding="utf-8")
+            self.assertIn('aria-live="polite"', document, slug)
+            self.assertIn('type="reset"', document, slug)
+            self.assertIn("<noscript>", document, slug)
+            self.assertIn('for="', document, slug)
+        fee = (out / "tools/fee-calculator/index.html").read_text(encoding="utf-8")
+        self.assertIn('<option value="standard">Standard 30%</option>', fee)
+        rev = (out / "tools/revenue-estimator/index.html").read_text(encoding="utf-8")
+        self.assertIn('<option value="standard">Standard 30%</option>', rev)
+        compare = (out / "tools/market-compare/index.html").read_text(encoding="utf-8")
+        self.assertIn('"rank"', compare)
+
     def test_market_pages(self):
         out = self.build()
         index = (out / "markets/index.html").read_text(encoding="utf-8")
