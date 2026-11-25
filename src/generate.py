@@ -137,12 +137,13 @@ def strip_lang_prefix(path: str, lang: str) -> str:
 
 
 def page(title: str, description: str, path: str, body: str, lang: str,
-         base: str, script: str = "", schema: dict | None = None) -> str:
+         base: str, script: str = "", schema: dict | None = None,
+         noindex: bool = False) -> str:
     t = L.get(lang)
     logical = strip_lang_prefix(path, lang)
-    alts = hreflang_tags(alternates(logical, base))
+    alts = "" if noindex else hreflang_tags(alternates(logical, base))
     ld = ""
-    if schema:
+    if schema and not noindex:
         ld = '<script type="application/ld+json">' + script_json(schema) + "</script>"
     return f"""<!doctype html>
 <html lang="{esc(lang)}">
@@ -151,7 +152,7 @@ def page(title: str, description: str, path: str, body: str, lang: str,
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>{esc(title)}</title>
 <meta name="description" content="{esc(description)}"/>
-<meta name="robots" content="index,follow"/>
+<meta name="robots" content="{'noindex,follow' if noindex else 'index,follow'}"/>
 <link rel="canonical" href="{esc(base + path)}"/>
 <meta property="og:type" content="website"/>
 <meta property="og:site_name" content="{esc(C.SITE_NAME)}"/>
@@ -622,6 +623,7 @@ def build_site(snapshot: dict, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     base = C.BASE_URL
     paths = []
+    app_pages = 0
     for lang in C.LANGS:
         t = L.get(lang)
         prefix = "" if lang == "en" else f"/{lang}"
@@ -740,8 +742,9 @@ def build_site(snapshot: dict, out: Path) -> None:
                               "creator": {"@type": "Organization", "name": C.AUTHOR},
                               "isAccessibleForFree": True,
                               "sameAs": C.API_BASE}
-                    dest.write_text(page(title, t["trend_sub"].format(date=snapshot["date"]), app_path, body, lang, base, schema=schema), encoding="utf-8")
-                    paths.append(app_path)
+                    # 600 个 app 页每页仅 50–130 词，属薄页：保留为可达的辅助页但排除出索引
+                    dest.write_text(page(title, t["trend_sub"].format(date=snapshot["date"]), app_path, body, lang, base, schema=schema, noindex=True), encoding="utf-8")
+                    app_pages += 1
 
         about_path = prefix + "/about/"
         dest = out / about_path.strip("/") / "index.html"
@@ -779,7 +782,7 @@ def build_site(snapshot: dict, out: Path) -> None:
     (out / "sitemap.xml").write_text("\n".join(sitemap) + "\n", encoding="utf-8")
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n", encoding="utf-8")
     (out / "404.html").write_text(not_found_page(base), encoding="utf-8")
-    print(f"[done] {len(paths)} indexable URLs -> {out}/")
+    print(f"[done] {len(paths)} indexable URLs -> {out}/ ({app_pages} thin app pages built, noindex)" )
 
 
 def main() -> None:

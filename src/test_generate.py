@@ -62,12 +62,13 @@ class ToolkitTests(unittest.TestCase):
         app_pages = sum(1 for m, v in self.snapshot["markets"].items()
                         for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         pages = list(out.rglob("index.html"))
-        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1 + app_pages
-        expected = len(C.LANGS) * per_lang
-        self.assertEqual(len(pages), expected)
+        # 薄 app 页仍然生成（可被内链访问），但 noindex 且不进 sitemap
+        indexable_per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
+        self.assertEqual(len(pages), len(C.LANGS) * (indexable_per_lang + app_pages))
         root = ET.parse(out / "sitemap.xml").getroot()
         urls = [x.text for x in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
-        self.assertEqual(len(urls), expected)
+        self.assertEqual(len(urls), len(C.LANGS) * indexable_per_lang)
+        self.assertFalse(any("/apps/" in u for u in urls))
         for url in urls:
             path = urlparse(url).path.strip("/")
             self.assertTrue((out / path / "index.html").exists())
@@ -79,7 +80,7 @@ class ToolkitTests(unittest.TestCase):
         app_pages = sum(1 for m, v in self.snapshot["markets"].items()
                         for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         self.assertIn(f"<lastmod>{self.snapshot['date']}</lastmod>", document)
-        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1 + app_pages
+        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
         self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * per_lang)
 
     def test_tool_prose(self):
@@ -158,7 +159,9 @@ class ToolkitTests(unittest.TestCase):
         self.assertIn("<svg", doc)
         self.assertIn("rank history", doc)
         self.assertIn("14-day change", doc)
-        self.assertIn('hreflang="x-default"', doc)
+        # 薄页策略：不进索引、不给 hreflang 集群信号，但保持 follow 传递权重
+        self.assertIn('content="noindex,follow"', doc)
+        self.assertNotIn('hreflang="x-default"', doc)
         # market table links into the trend page
         market = (out / "markets/us/index.html").read_text(encoding="utf-8")
         self.assertIn(f"/apps/us-free-{app_id}/", market)
@@ -171,8 +174,9 @@ class ToolkitTests(unittest.TestCase):
         self.assertIn('name="twitter:card" content="summary"', doc)
         app = next((out / "apps").glob("us-free-*/index.html"))
         t = app.read_text(encoding="utf-8")
-        self.assertIn('"@type": "Dataset"', t)
-        self.assertIn('"temporalCoverage": "2026-11-23"', t)
+        # app 薄页 noindex 后不再挂 Dataset schema，避免与索引状态自相矛盾
+        self.assertIn('content="noindex,follow"', t)
+        self.assertNotIn('"@type": "Dataset"', t)
         m = (out / "movers/index.html").read_text(encoding="utf-8")
         self.assertIn('"@type": "Dataset"', m)
 
