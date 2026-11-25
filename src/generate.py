@@ -620,7 +620,7 @@ def build_site(snapshot: dict, out: Path) -> None:
                   "url": base + home_path, "publisher": {"@type": "Organization", "name": C.AUTHOR}}
         (out / home_path.strip("/") / "index.html").parent.mkdir(parents=True, exist_ok=True)
         (out / home_path.strip("/") / "index.html").write_text(
-            page(f"{C.WORK_TITLE} — {C.SITE_NAME}", t["home_sub"], home_path, body, lang, base, schema=schema), encoding="utf-8")
+            page(f'{t["home_h1"].rstrip("。.")} — {C.SITE_NAME}', t["home_sub"], home_path, body, lang, base, schema=schema), encoding="utf-8")
         paths.append(home_path)
 
         for slug in TOOL_SLUGS:
@@ -671,7 +671,7 @@ def build_site(snapshot: dict, out: Path) -> None:
             detail_path = prefix + f"/markets/{market}/"
             dest = out / detail_path.strip("/") / "index.html"
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(page(C.market_name(market, lang), t["market_sub"], detail_path, detail_body, lang, base), encoding="utf-8")
+            dest.write_text(page(C.market_name(market, lang), t["market_sub"].format(date=snapshot["date"]), detail_path, detail_body, lang, base), encoding="utf-8")
             paths.append(detail_path)
 
         movers_data = rank_movers(snapshot)
@@ -706,7 +706,7 @@ def build_site(snapshot: dict, out: Path) -> None:
                               "creator": {"@type": "Organization", "name": C.AUTHOR},
                               "isAccessibleForFree": True,
                               "sameAs": C.API_BASE}
-                    dest.write_text(page(title, t["trend_sub"], app_path, body, lang, base, schema=schema), encoding="utf-8")
+                    dest.write_text(page(title, t["trend_sub"].format(date=snapshot["date"]), app_path, body, lang, base, schema=schema), encoding="utf-8")
                     paths.append(app_path)
 
         about_path = prefix + "/about/"
