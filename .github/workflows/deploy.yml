@@ -64,12 +64,21 @@ jobs:
           GSC_VERIFY_CONTENT: ${{ secrets.GSC_VERIFY_CONTENT }}
 
       - name: Ensure Cloudflare Pages project exists
-        uses: cloudflare/wrangler-action@v4
-        continue-on-error: true
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create apprank-toolkit --production-branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # 先查再建：项目已存在时 create 必然报 8000002，之前靠 continue-on-error
+          # 吞掉，每次运行都留一条红色标注。
+          code=$(curl -s -o /tmp/pages-project.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/apprank-toolkit")
+          if [ "$code" = "200" ]; then
+            echo "[i] Pages project apprank-toolkit exists, nothing to do"
+            exit 0
+          fi
+          echo "[i] Pages project not found (HTTP $code), creating it"
+          npx --yes wrangler@4 pages project create apprank-toolkit --production-branch main
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v4
