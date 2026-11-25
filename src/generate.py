@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import re
 import json
 import sys
 from pathlib import Path
@@ -74,46 +75,58 @@ const tbl=rows=>'<table class="res">'+rows+'</table>';
 const bad=m=>'<p class="bad">'+m+'</p>';
 const head=m=>'<p class="res-head">'+m+'</p>';
 const val=id=>{const s=document.getElementById(id).value.trim();return s===''?NaN:Number(s);};
-function bind(run){const f=document.getElementById('tool-form');
-f.addEventListener('submit',e=>{e.preventDefault();run();});
-f.addEventListener('reset',()=>setTimeout(run,0));run();}
+const q=new URLSearchParams(location.search);
+function restore(fields){fields.forEach(id=>{const v=q.get(id);if(v===null||v==='')return;const el=document.getElementById(id);if(!el)return;
+if(el.tagName==='SELECT'&&!Array.from(el.options).some(o=>o.value===v))return;el.value=v;});}
+function persist(fields){const p=new URLSearchParams();fields.forEach(id=>{const el=document.getElementById(id);if(el)p.set(id,el.value);});
+const s=p.toString();history.replaceState(null,'',location.pathname+(s?'?'+s:'')+location.hash);}
+function keepLangState(){document.querySelectorAll('.langs a').forEach(a=>{a.addEventListener('click',()=>{
+if(location.search){a.href=a.href.split('?')[0]+location.search;}});});}
+function bind(run,fields){restore(fields);keepLangState();const f=document.getElementById('tool-form');
+const go=()=>{run();persist(fields);};
+f.addEventListener('submit',e=>{e.preventDefault();go();});
+f.addEventListener('reset',()=>setTimeout(go,0));go();}
 """
 
 JS = {
     "rank-change": JS_HEAD + """
+const F=['prev','curr'];
 function run(){const p=val('prev'),c=val('curr');
 if(!(p>=1)||!(c>=1)){put(bad(T.invalid_input));return;}
 const d=p-c,msg=d>0?T.improved.replace('{n}',d):d<0?T.declined.replace('{n}',Math.abs(d)):T.no_change;
 const mb=band(p),mc=band(c);
 put(head(T.result+': '+msg)+tbl(row(T.band_multiplier,mb+' \u2192 '+mc)+row(T.visibility,(mc/mb).toFixed(2)+'\u00d7')));}
-bind(run);
+bind(run,F);
 """,
     "revenue-estimator": JS_HEAD + """
+const F=['rank','downloads','conversion','price','tier'];
 function run(){const rank=val('rank'),base=val('downloads'),conv=val('conversion'),price=val('price');
 if(!(rank>=1)||!(conv>=0)||!(conv<=100)||!(base>=0)){put(bad(T.invalid_input));return;}
 const rate=CFG.fees[document.getElementById('tier').value];
 const downloads=base*band(rank),paying=downloads*conv/100,gross=paying*price,fee=gross*rate,net=gross-fee;
 put(head(T.net+': '+money(net))+tbl(row(T.downloads_after,num(downloads))+row(T.paying_users,num(paying))+row(T.gross,money(gross))+row(T.fee_amount,money(fee))+row(T.arpu,money(downloads?gross/downloads:0))));}
-bind(run);
+bind(run,F);
 """,
     "market-compare": JS_HEAD + """
+const F=['a','b','chart'];
 function run(){const a=document.getElementById('a').value,b=document.getElementById('b').value,ch=document.getElementById('chart').value;
 const ma=DATA.markets[a]&&DATA.markets[a].charts[ch],mb=DATA.markets[b]&&DATA.markets[b].charts[ch];
-if(!ma||!mb){put(bad(T.invalid_input));return;}
+if(!ma||!mb||a===b){put(bad(T.pick_pair));return;}
 const ra=ma.rows,rb=mb.rows,ids=new Set(ra.map(r=>r.app_id));
 const shared=rb.filter(r=>ids.has(r.app_id));
 const rows=shared.slice(0,10).map(r=>{const o=ra.find(x=>x.app_id===r.app_id);return row(htmlEscape(r.name),'#'+o.rank+' \u2192 #'+r.rank);}).join('');
 put(head(T.overlap+': '+shared.length+'/10')+(rows?'<table class="res">'+rows+'</table>':bad(T.no_overlap)));}
 function htmlEscape(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-bind(run);
+bind(run,F);
 """,
     "fee-calculator": JS_HEAD + """
+const F=['gross','tier'];
 function run(){const gross=val('gross');
 if(!(gross>=0)){put(bad(T.invalid_input));return;}
 const rate=CFG.fees[document.getElementById('tier').value],fee=gross*rate,net=gross-fee;
 const cmp=Object.entries(CFG.fees).map(([k,r])=>row(T[k],money(gross*(1-r)))).join('');
 put(head(T.net_revenue+': '+money(net))+tbl(row(T.fee_gross,money(gross))+row(T.fee_amount,money(fee)))+'<h3>'+T.tier_compare+'</h3>'+tbl(cmp));}
-bind(run);
+bind(run,F);
 """,
 }
 

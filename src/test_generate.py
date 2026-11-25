@@ -135,6 +135,16 @@ class ToolkitTests(unittest.TestCase):
         compare = (out / "tools/market-compare/index.html").read_text(encoding="utf-8")
         self.assertIn('"rank"', compare)
 
+
+    def test_calculators_keep_state_across_language_switch(self):
+        out = self.build()
+        for slug in C.TOOLS:
+            document = (out / "tools" / slug / "index.html").read_text(encoding="utf-8")
+            self.assertIn("const F=[", document, slug)
+            self.assertIn("keepLangState", document, slug)
+            self.assertIn("history.replaceState", document, slug)
+            self.assertIn("new URLSearchParams(location.search)", document, slug)
+
     def test_market_pages(self):
         out = self.build()
         index = (out / "markets/index.html").read_text(encoding="utf-8")
