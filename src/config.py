@@ -49,6 +49,11 @@ HREFLANG = {
 
 TOOLS = ("rank-change", "revenue-estimator", "market-compare", "fee-calculator")
 
+# Cloudflare Web Analytics (RUM). Cookie-free, so no consent banner is needed.
+# Left empty until a site token exists in the Cloudflare dashboard
+# (Analytics → Web Analytics → Add site → JS snippet); when empty no script is emitted.
+WA_TOKEN = os.environ.get("CF_WA_TOKEN", "").strip()
+
 # Free App Store / Google Play fee scenarios. These are assumptions, not billing advice.
 FEE_RATES = {"standard": 0.30, "small": 0.15}
 

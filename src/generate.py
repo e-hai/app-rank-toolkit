@@ -64,7 +64,9 @@ STYLE = (
     ".presets{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:.8rem;color:var(--muted)}"
     ".presets button{grid-column:auto;padding:5px 10px;font-size:.8rem;font-weight:600;border-radius:7px;"
     "background:#fff;color:var(--fg);border:1px solid var(--line)}.presets button:hover{background:var(--soft)}"
-    ".matrix table{font-size:.86rem}.matrix td.num{text-align:right;font-variant-numeric:tabular-nums}"
+    ".matrix table{font-size:.86rem}.matrix .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}"
+    ".matrix th,.matrix td{padding:8px 6px;white-space:nowrap}"
+    ".matrix td.num{text-align:right;font-variant-numeric:tabular-nums}"
     ".matrix .diag{color:var(--muted);background:#f5f7fa}.matrix th{font-size:.72rem}"
     "footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
     "color:var(--muted);font-size:.85rem}@media(max-width:640px){h1{font-size:2.2rem}.hero{padding:40px 0 30px}}"
@@ -207,6 +209,10 @@ def page(title: str, description: str, path: str, body: str, lang: str,
     t = L.get(lang)
     logical = strip_lang_prefix(path, lang)
     alts = "" if noindex else hreflang_tags(alternates(logical, base))
+    wa_tag = ""
+    if C.WA_TOKEN:
+        wa_tag = ('<script defer src="https://static.cloudflareinsights.com/beacon.min.js" '
+                  "data-cf-beacon='" + json.dumps({"token": C.WA_TOKEN}) + "'></script>")
     ld = ""
     if schema and not noindex:
         for item in (schema if isinstance(schema, list) else [schema]):
@@ -239,6 +245,7 @@ def page(title: str, description: str, path: str, body: str, lang: str,
 {'<div class="wrap">' + language_nav(lang, logical, base) + '</div>'}
 <main>{body}</main>
 <footer><div class="wrap">{esc(t['footer_note'])} · {esc(C.AUTHOR)} · <a href="{esc(C.API_BASE)}">{esc(t['source'])}</a></div></footer>
+{wa_tag}
 {('<script>' + script + '</script>') if script else ''}
 </body>
 </html>
@@ -324,8 +331,8 @@ def overlap_matrix(lang: str, snapshot: dict) -> str:
                 n = 10 if same else len(ids[a] & ids[b])
                 cells += f'<td class="num{" diag" if same else ""}">{n}</td>'
             body += f'<tr><th>{esc(C.market_name(a, lang))}</th>{cells}</tr>'
-        blocks.append(f'<h3>{esc(t[chart])}</h3><table><thead><tr><th></th>{head_cells}</tr></thead>'
-                      f'<tbody>{body}</tbody></table>')
+        blocks.append(f'<h3>{esc(t[chart])}</h3><div class="tscroll"><table><thead><tr><th></th>{head_cells}</tr></thead>'
+                      f'<tbody>{body}</tbody></table></div>')
     return (f'<section class="matrix"><h2>{esc(t["matrix_title"])}</h2>'
             f'<p class="note">{esc(t["matrix_desc"])}</p>{"".join(blocks)}</section>')
 

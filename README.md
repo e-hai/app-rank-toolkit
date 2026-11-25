@@ -49,3 +49,24 @@ GitHub Actions 每次 push 会：
 6. 部署到 Cloudflare Pages
 
 Bing 提交未启用。
+
+## 测试
+
+```bash
+npm run test:py      # 22 项离线单测：公式、生成、sitemap、面包屑、状态持久化、矩阵一致性
+npm run build        # 生成 site/
+npm run test:e2e     # 真实 Chrome 跑四个计算器（需先 build）
+```
+
+`test:e2e` 用本机 Chrome（`channel: "chrome"`），不额外下载浏览器。覆盖 19 项：默认漏斗、下载量预设、URL 还原、切语言保持选择、市场对比双排名、同市场拒绝、空输入报错、矩阵 6×6 与对角线、390px 无横向溢出。CI 不跑 e2e（GitHub runner 无桌面 Chrome），本地改完计算器脚本后跑一次即可。
+
+## 流量统计（Cloudflare Web Analytics）
+
+无 cookie，不需要同意弹窗。开启步骤：
+
+1. Cloudflare Dashboard → Analytics → Web Analytics → Add site
+2. 输入 `apprank-toolkit.pages.dev`，安装方式选 **JS snippet**
+3. 复制片段里的 `token`
+4. `gh secret set CF_WA_TOKEN -R e-hai/seo-app-rank-toolkit`（或写到仓库 Secrets 页）
+
+配置后 `src/config.py` 读取 `CF_WA_TOKEN`，生成时给每页尾部注入一行 beacon 脚本；未配置则完全不输出，不会留下空标签。金额与页面结构不受影响。

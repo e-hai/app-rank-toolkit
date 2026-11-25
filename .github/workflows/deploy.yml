@@ -31,6 +31,7 @@ jobs:
         run: python3 src/generate.py --out site
         env:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL || 'https://apprank-toolkit.pages.dev' }}
+          CF_WA_TOKEN: ${{ secrets.CF_WA_TOKEN }}
 
       - name: Sanity check
         run: |

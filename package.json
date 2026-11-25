@@ -1,0 +1,29 @@
+{
+  "name": "seo-app-rank-toolkit",
+  "version": "1.0.0",
+  "description": "一个基于公开 App Store 排名数据的免费工具站，目标是提供真正可计算的 ASO 工具，而不是批量 SEO 页面。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test:py": "cd src && python3 -m unittest -q",
+    "build": "python3 src/generate.py --out site",
+    "test:e2e": "node tests/e2e/smoke.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-hai/seo-app-rank-toolkit.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/e-hai/seo-app-rank-toolkit/issues"
+  },
+  "homepage": "https://github.com/e-hai/seo-app-rank-toolkit#readme",
+  "devDependencies": {
+    "playwright": "^1.65.1"
+  },
+  "private": true
+}
