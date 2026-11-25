@@ -169,10 +169,44 @@ def page(title: str, description: str, path: str, body: str, lang: str,
 <body>
 <header><div class="wrap"><a class="brand" href="{esc(base + ('' if lang=='en' else '/'+lang) + '/')}">{esc(C.SITE_NAME)}</a>
 <nav><a href="{esc(base + ('' if lang=='en' else '/'+lang) + '/')}">Home</a><a href="{esc(base + ('' if lang=='en' else '/'+lang) + '/methodology/')}">{esc(t['method_title'])}</a></nav></div></header>
-{language_nav(lang, logical, base)}
+{'<div class="wrap">' + language_nav(lang, logical, base) + '</div>'}
 <main>{body}</main>
 <footer><div class="wrap">{esc(t['footer_note'])} · {esc(C.AUTHOR)} · <a href="{esc(C.API_BASE)}">{esc(t['source'])}</a></div></footer>
 {('<script>' + script + '</script>') if script else ''}
+</body>
+</html>
+"""
+
+
+def not_found_page(base: str) -> str:
+    """404 页面：未知路径返回真 404，避免整站软 404。"""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Page not found — {esc(C.SITE_NAME)}</title>
+<meta name="robots" content="noindex,follow"/>
+<meta name="description" content="This page does not exist."/>
+<meta name="twitter:card" content="summary"/>
+<style>{STYLE}</style>
+</head>
+<body>
+<header><div class="wrap"><a class="brand" href="{esc(base)}/">{esc(C.SITE_NAME)}</a>
+<nav><a href="{esc(base)}/">Home</a><a href="{esc(base)}/methodology/">{esc(L.get('en')['method_title'])}</a></nav></div></header>
+<main><div class="wrap">
+<p class="eyebrow">404</p>
+<h1>That page is not here</h1>
+<p class="lead">The URL you opened does not match any page on this site. It may have moved, or the app or market you were looking for was never published.</p>
+<p>Try one of these instead:</p>
+<ul>
+<li><a href="{esc(base)}/">All calculators and guides</a></li>
+<li><a href="{esc(base)}/tools/rank-change/">Rank change calculator</a></li>
+<li><a href="{esc(base)}/markets/">Market rankings</a></li>
+<li><a href="{esc(base)}/movers/">Rank movers</a></li>
+</ul>
+</div></main>
+<footer><div class="wrap">{esc(L.get('en')['footer_note'])} · {esc(C.AUTHOR)}</div></footer>
 </body>
 </html>
 """
@@ -744,6 +778,7 @@ def build_site(snapshot: dict, out: Path) -> None:
     sitemap.append("</urlset>")
     (out / "sitemap.xml").write_text("\n".join(sitemap) + "\n", encoding="utf-8")
     (out / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n", encoding="utf-8")
+    (out / "404.html").write_text(not_found_page(base), encoding="utf-8")
     print(f"[done] {len(paths)} indexable URLs -> {out}/")
 
 
