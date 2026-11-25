@@ -16,6 +16,10 @@ import content as K
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Number formatting locale per site language. Currency stays USD (the data is
+# US-dollar revenue); only separators and digit grouping follow the reader.
+LOCALE_MAP = {"en": "en-US", "ko": "ko-KR", "ja": "ja-JP", "zh": "zh-CN", "tr": "tr-TR"}
+
 STYLE = (
     ":root{--fg:#15181d;--muted:#5c6672;--line:#dfe4ea;--accent:#1f6feb;--accent2:#0b7285;"
     "--paper:#fbfcfe;--card:#ffffff;--soft:#eef4ff;--serif:Georgia,serif}"
@@ -57,6 +61,11 @@ STYLE = (
     ".crumbs a{color:var(--muted)}.crumbs span{color:var(--fg);font-weight:600}"
     ".rel{font-size:.9rem;margin:6px 0 26px}.rel a{color:var(--accent2)}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
     "margin:0 0 .4rem;color:var(--fg)}.prose p{color:var(--muted);margin:0}"
+    ".presets{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:.8rem;color:var(--muted)}"
+    ".presets button{grid-column:auto;padding:5px 10px;font-size:.8rem;font-weight:600;border-radius:7px;"
+    "background:#fff;color:var(--fg);border:1px solid var(--line)}.presets button:hover{background:var(--soft)}"
+    ".matrix table{font-size:.86rem}.matrix td.num{text-align:right;font-variant-numeric:tabular-nums}"
+    ".matrix .diag{color:var(--muted);background:#f5f7fa}.matrix th{font-size:.72rem}"
     "footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
     "color:var(--muted);font-size:.85rem}@media(max-width:640px){h1{font-size:2.2rem}.hero{padding:40px 0 30px}}"
 )
@@ -65,8 +74,8 @@ JS_HEAD = """
 const DATA=__DATA__;
 const T=__T__;
 const CFG=__CFG__;
-const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n);
-const num=n=>new Intl.NumberFormat('en-US',{maximumFractionDigits:1}).format(n);
+const money=n=>new Intl.NumberFormat(CFG.locale,{style:'currency',currency:'USD',maximumFractionDigits:2}).format(n);
+const num=n=>new Intl.NumberFormat(CFG.locale,{maximumFractionDigits:1}).format(n);
 function band(r){r=Number(r)||1;const bands=CFG.rank_bands;for(const [ceil,mult] of bands){if(r<=ceil)return mult;}return CFG.floor;}
 const foot='<p class="note"><a href="'+CFG.method+'">'+T.method_title+'</a></p>';
 function put(html){document.getElementById('result').innerHTML=html+foot;}
@@ -82,10 +91,10 @@ function persist(fields){const p=new URLSearchParams();fields.forEach(id=>{const
 const s=p.toString();history.replaceState(null,'',location.pathname+(s?'?'+s:'')+location.hash);}
 function keepLangState(){document.querySelectorAll('.langs a').forEach(a=>{a.addEventListener('click',()=>{
 if(location.search){a.href=a.href.split('?')[0]+location.search;}});});}
-function bind(run,fields){restore(fields);keepLangState();const f=document.getElementById('tool-form');
+function bind(run,fields,after){restore(fields);keepLangState();const f=document.getElementById('tool-form');
 const go=()=>{run();persist(fields);};
 f.addEventListener('submit',e=>{e.preventDefault();go();});
-f.addEventListener('reset',()=>setTimeout(go,0));go();}
+f.addEventListener('reset',()=>setTimeout(go,0));go();if(after)after(go);}
 """
 
 JS = {
@@ -105,7 +114,8 @@ if(!(rank>=1)||!(conv>=0)||!(conv<=100)||!(base>=0)){put(bad(T.invalid_input));r
 const rate=CFG.fees[document.getElementById('tier').value];
 const downloads=base*band(rank),paying=downloads*conv/100,gross=paying*price,fee=gross*rate,net=gross-fee;
 put(head(T.net+': '+money(net))+tbl(row(T.downloads_after,num(downloads))+row(T.paying_users,num(paying))+row(T.gross,money(gross))+row(T.fee_amount,money(fee))+row(T.arpu,money(downloads?gross/downloads:0))));}
-bind(run,F);
+bind(run,F,go=>{const d=document.getElementById('downloads');
+document.querySelectorAll('[data-dl]').forEach(b=>b.addEventListener('click',()=>{d.value=b.dataset.dl;go();}));});
 """,
     "market-compare": JS_HEAD + """
 const F=['a','b','chart'];
@@ -298,6 +308,28 @@ def fee_scenario(gross: float, fee_rate: float) -> dict:
     return {"gross": gross, "fee": gross * fee_rate, "net": gross * (1 - fee_rate)}
 
 
+def overlap_matrix(lang: str, snapshot: dict) -> str:
+    """Static 6x6 overlap matrix per chart: how many of the 10 top apps appear in both markets."""
+    t = L.get(lang)
+    markets = [m for m in C.MARKETS if m in snapshot.get("markets", {})]
+    blocks = []
+    for chart in C.CHARTS:
+        ids = {m: {r["app_id"] for r in snapshot["markets"][m]["charts"][chart]["rows"]} for m in markets}
+        head_cells = "".join(f"<th>{esc(C.market_name(m, lang))}</th>" for m in markets)
+        body = ""
+        for a in markets:
+            cells = ""
+            for b in markets:
+                same = a == b
+                n = 10 if same else len(ids[a] & ids[b])
+                cells += f'<td class="num{" diag" if same else ""}">{n}</td>'
+            body += f'<tr><th>{esc(C.market_name(a, lang))}</th>{cells}</tr>'
+        blocks.append(f'<h3>{esc(t[chart])}</h3><table><thead><tr><th></th>{head_cells}</tr></thead>'
+                      f'<tbody>{body}</tbody></table>')
+    return (f'<section class="matrix"><h2>{esc(t["matrix_title"])}</h2>'
+            f'<p class="note">{esc(t["matrix_desc"])}</p>{"".join(blocks)}</section>')
+
+
 def form_html(lang: str, slug: str, snapshot: dict) -> str:
     t = L.get(lang)
     actions = (f'<div class="actions"><button type="submit">{esc(t["calculate"])}</button>'
@@ -313,7 +345,11 @@ def form_html(lang: str, slug: str, snapshot: dict) -> str:
         return (f'<form id="tool-form"><div><label for="rank">{esc(t["rank_band"])}</label>'
                 f'<input id="rank" name="rank" type="number" min="1" step="1" value="8"/></div>'
                 f'<div><label for="downloads">{esc(t["downloads"])}</label>'
-                f'<input id="downloads" name="downloads" type="number" min="0" step="1000" value="50000"/></div>'
+                f'<input id="downloads" name="downloads" type="number" min="0" step="1000" value="50000"/>'
+                f'<div class="presets"><span>{esc(t["preset_label"])}</span>'
+                f'<button type="button" data-dl="5000">5k</button>'
+                f'<button type="button" data-dl="50000">50k</button>'
+                f'<button type="button" data-dl="500000">500k</button></div></div>'
                 f'<div><label for="conversion">{esc(t["conversion"])}</label>'
                 f'<input id="conversion" name="conversion" type="number" min="0" max="100" step="0.1" value="4"/></div>'
                 f'<div><label for="price">{esc(t["price"])}</label>'
@@ -780,6 +816,7 @@ def build_site(snapshot: dict, out: Path) -> None:
                     f'<p class="note">{esc(t["data_fresh"].format(date=snapshot["date"]))}</p></div></section>'
                     f'<div class="wrap"><div class="card">{form_html(lang, slug, snapshot)}<div id="result" class="result" role="status" aria-live="polite"></div>'
                     f'<p class="note">{esc(t["scenario_note"])}</p></div>'
+                    f'{overlap_matrix(lang, snapshot) if slug == "market-compare" else ""}'
                     f'{tool_prose(lang, slug)}'
                     f'{related_tools(lang, prefix, base, slug)}'
                     f'<p class="note">{esc(t["disclosure"])}</p></div>')
@@ -793,7 +830,8 @@ def build_site(snapshot: dict, out: Path) -> None:
                 payload = "{}"
             script = JS[slug].replace("__DATA__", payload).replace("__T__", script_json(t)).replace(
                 "__CFG__", script_json({"fees": C.FEE_RATES, "rank_bands": C.RANK_BANDS,
-                                    "floor": C.FLOOR_MULTIPLIER, "method": prefix + "/methodology/"}))
+                                    "floor": C.FLOOR_MULTIPLIER, "method": prefix + "/methodology/",
+                                    "locale": LOCALE_MAP.get(lang, "en-US")}))
             schema = [{"@context": "https://schema.org", "@type": "WebApplication", "name": t[title_key],
                        "url": base + tool_path, "applicationCategory": "UtilitiesApplication",
                        "operatingSystem": "Any", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},

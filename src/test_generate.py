@@ -272,5 +272,46 @@ class ToolkitTests(unittest.TestCase):
                 self.assertNotIn("数据来源", document)
 
 
+    def test_overlap_matrix_and_presets(self):
+        out = self.build()
+        matrix = G.overlap_matrix("en", self.snapshot)
+        self.assertIn("Cross-market overlap matrix", matrix)
+        self.assertEqual(matrix.count("<table>"), len(C.CHARTS))
+        self.assertEqual(matrix.count('class="num diag"'), len(C.MARKETS) * len(C.CHARTS))
+        self.assertEqual(matrix.count('<td class="num"'), len(C.CHARTS) * len(C.MARKETS) * (len(C.MARKETS) - 1))
+        us_gb = G.compare_markets(self.snapshot, "us", "gb", "free")["overlap"]
+        self.assertIn(f'<td class="num">{us_gb}</td>', matrix)
+        # symmetry: overlap(a,b) == overlap(b,a) for every pair and chart
+        for chart in C.CHARTS:
+            for a in C.MARKETS:
+                for b in C.MARKETS:
+                    if a != b:
+                        self.assertEqual(G.compare_markets(self.snapshot, a, b, chart)["overlap"],
+                                         G.compare_markets(self.snapshot, b, a, chart)["overlap"])
+        compare = (out / "tools/market-compare/index.html").read_text(encoding="utf-8")
+        self.assertIn('class="matrix"', compare)
+        zh = (out / "zh/tools/market-compare/index.html").read_text(encoding="utf-8")
+        self.assertIn("跨市场重合矩阵", zh)
+        tr = (out / "tr/tools/market-compare/index.html").read_text(encoding="utf-8")
+        self.assertIn("Pazarlar arası örtüşme matrisi", tr)
+
+    def test_revenue_presets_and_number_locale(self):
+        out = self.build()
+        rev = (out / "tools/revenue-estimator/index.html").read_text(encoding="utf-8")
+        self.assertIn('class="presets"', rev)
+        for dl in ("5000", "50000", "500000"):
+            self.assertIn(f'data-dl="{dl}"', rev)
+        self.assertIn('"locale": "en-US"', rev)
+        ko = (out / "ko/tools/revenue-estimator/index.html").read_text(encoding="utf-8")
+        self.assertIn('"locale": "ko-KR"', ko)
+        self.assertIn("다운로드 프리셋", ko)
+        # 币种仍是美元，只有分隔符随语言变化
+        for code in C.LANGS:
+            prefix = "" if code == "en" else f"/{code}"
+            doc = (out / (prefix.strip("/") + "/" if prefix else "") / "tools/revenue-estimator/index.html").read_text(encoding="utf-8")
+            self.assertIn("currency:'USD'", doc, code)
+            self.assertNotIn("currency:'KRW'", doc, code)
+
+
 if __name__ == "__main__":
     unittest.main()
