@@ -46,7 +46,9 @@ STYLE = (
     "border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:.78rem;text-transform:uppercase;"
     "letter-spacing:.04em}.note{color:var(--muted);font-size:.88rem}code{background:#f1f3f6;padding:2px 6px;"
     "border-radius:5px}.editorial{display:flex;gap:14px;flex-wrap:wrap;font-size:.88rem;margin:22px 0 8px}"
-    ".editorial a{color:var(--accent2)}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
+    ".editorial a{color:var(--accent2)}.crumbs{font-size:.84rem;color:var(--muted);padding:18px 0 0}"
+    ".crumbs a{color:var(--muted)}.crumbs span{color:var(--fg);font-weight:600}"
+    ".rel{font-size:.9rem;margin:6px 0 26px}.rel a{color:var(--accent2)}.prose{max-width:760px;margin:26px 0}.prose section{margin:0 0 22px}.prose h2{font-size:1.15rem;"
     "margin:0 0 .4rem;color:var(--fg)}.prose p{color:var(--muted);margin:0}"
     "footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0 48px;"
     "color:var(--muted);font-size:.85rem}@media(max-width:640px){h1{font-size:2.2rem}.hero{padding:40px 0 30px}}"
@@ -110,6 +112,22 @@ def hreflang_tags(mapping: dict[str, str]) -> str:
     return "\n".join(parts)
 
 
+def crumbs_html(items: list[tuple[str, str]]) -> str:
+    parts = [f'<a href="{esc(h)}">{esc(l)}</a>' if h else f'<span>{esc(l)}</span>' for l, h in items]
+    return '<div class="wrap"><nav class="crumbs">' + ' / '.join(parts) + "</nav></div>"
+
+
+def breadcrumb_schema(items: list[tuple[str, str]], base: str) -> dict:
+    entries = []
+    for i, (label, href) in enumerate(items, start=1):
+        entry = {"@type": "ListItem", "position": i, "name": label}
+        if href:
+            entry["item"] = base + href
+        entries.append(entry)
+    return {"@context": "https://schema.org", "@type": "BreadcrumbList",
+            "itemListElement": entries}
+
+
 def alternates(path: str, base: str) -> dict[str, str]:
     mapping = {lang: base + ("" if lang == "en" else f"/{lang}") + path for lang in C.LANGS}
     mapping["x-default"] = base + path
@@ -144,7 +162,8 @@ def page(title: str, description: str, path: str, body: str, lang: str,
     alts = "" if noindex else hreflang_tags(alternates(logical, base))
     ld = ""
     if schema and not noindex:
-        ld = '<script type="application/ld+json">' + script_json(schema) + "</script>"
+        for item in (schema if isinstance(schema, list) else [schema]):
+            ld += '<script type="application/ld+json">' + script_json(item) + "</script>"
     return f"""<!doctype html>
 <html lang="{esc(lang)}">
 <head>
@@ -272,6 +291,22 @@ TOOL_COPY_KEYS = {
     "market-compare": ("cmp_how", "cmp_use", "cmp_ex", "cmp_faq"),
     "fee-calculator": ("fee_how", "fee_use", "fee_ex", "fee_faq"),
 }
+
+
+TOOL_TITLE_KEYS = {"rank-change": "rank_title", "revenue-estimator": "rev_title",
+                   "market-compare": "cmp_title", "fee-calculator": "fee_title"}
+
+
+def related_tools(lang: str, prefix: str, base: str, exclude: str = "") -> str:
+    t = L.get(lang)
+    gc = K.GUIDES[lang]
+    links = [f'<a href="{esc(base + prefix + "/tools/" + s + "/")}">{esc(t[TOOL_TITLE_KEYS[s]])}</a>'
+             for s in TOOL_SLUGS if s != exclude]
+    links.append(f'<a href="{esc(base + prefix + "/guides/")}">{esc(gc["guides_h1"])}</a>')
+    links.append(f'<a href="{esc(base + prefix + "/markets/")}">{esc(t["markets_title"])}</a>')
+    links.append(f'<a href="{esc(base + prefix + "/movers/")}">{esc(t["movers_title"])}</a>')
+    links.append(f'<a href="https://apprank.pages.dev/">{esc(t["charts_live"])}</a>')
+    return f'<h2>{esc(t["tool_label"])}</h2><p class="rel">{" · ".join(links)}</p>'
 
 
 def tool_prose(lang: str, slug: str) -> str:
@@ -659,30 +694,67 @@ def build_site(snapshot: dict, out: Path) -> None:
             page(f'{t["home_h1"].rstrip("。.")} — {C.SITE_NAME}', t["home_sub"], home_path, body, lang, base, schema=schema), encoding="utf-8")
         paths.append(home_path)
 
+        tools_path = prefix + "/tools/"
+        hub_cards = []
+        for slug in TOOL_SLUGS:
+            title_key = TOOL_TITLE_KEYS[slug]
+            desc_key = {"rank-change": "rank_desc", "revenue-estimator": "rev_desc",
+                        "market-compare": "cmp_desc", "fee-calculator": "fee_desc"}[slug]
+            hub_cards.append(f'<article class="card"><span class="pill">{esc(t["tool_label"])}</span>'
+                             f'<h3>{esc(t[title_key])}</h3><p>{esc(t[desc_key])}</p>'
+                             f'<a href="{esc(base + prefix + "/tools/" + slug + "/")}">{esc(t["open"])} →</a></article>')
+        hub_body = (crumbs_html([("Home", prefix + "/"), (t["tool_label"], None)])
+                    + f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["home_eyebrow"])}</span>'
+                    f'<h1>{esc(t["tool_label"])}</h1><p class="lead">{esc(t["home_sub"])}</p>'
+                    f'<p class="note">{esc(t["data_fresh"].format(date=snapshot["date"]))}</p></div></section>'
+                    f'<div class="wrap"><div class="grid">{"".join(hub_cards)}</div>'
+                    f'{related_tools(lang, prefix, base)}'
+                    f'{editorial_nav(lang, prefix, base)}'
+                    f'<p class="note">{esc(t["disclosure"])}</p></div>')
+        dest = out / tools_path.strip("/") / "index.html"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(page(f'{t["tool_label"]} — {C.SITE_NAME}', t["home_sub"], tools_path, hub_body, lang, base), encoding="utf-8")
+        paths.append(tools_path)
+
         for slug in TOOL_SLUGS:
             title_key = {"rank-change": "rank_title", "revenue-estimator": "rev_title",
                          "market-compare": "cmp_title", "fee-calculator": "fee_title"}[slug]
             desc_key = {"rank-change": "rank_desc", "revenue-estimator": "rev_desc",
                         "market-compare": "cmp_desc", "fee-calculator": "fee_desc"}[slug]
             tool_path = prefix + f"/tools/{slug}/"
-            body = (f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["tool_label"])}</span>'
-                    f'<h1>{esc(t[title_key])}</h1><p class="lead">{esc(t[desc_key])}</p></div></section>'
+            trail = [("Home", prefix + "/"), (t["tool_label"], prefix + "/tools/"),
+                     (t[title_key], None)]
+            body = (crumbs_html(trail)
+                    + f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["tool_label"])}</span>'
+                    f'<h1>{esc(t[title_key])}</h1><p class="lead">{esc(t[desc_key])}</p>'
+                    f'<p class="note">{esc(t["data_fresh"].format(date=snapshot["date"]))}</p></div></section>'
                     f'<div class="wrap"><div class="card">{form_html(lang, slug, snapshot)}<div id="result" class="result"></div>'
                     f'<p class="note">{esc(t["scenario_note"])}</p></div>'
-                    f'{tool_prose(lang, slug)}<p class="note">{esc(t["disclosure"])}</p></div>')
-            script = JS[slug].replace("__DATA__", script_json(snapshot)).replace("__T__", script_json(t)).replace(
+                    f'{tool_prose(lang, slug)}'
+                    f'{related_tools(lang, prefix, base, slug)}'
+                    f'<p class="note">{esc(t["disclosure"])}</p></div>')
+            if slug == "market-compare":
+                mini = {"markets": {m: {"charts": {c: {"rows": [
+                    {"app_id": r["app_id"], "name": r.get("name", "")} for r in ch.get("rows", [])]}
+                    for c, ch in me.get("charts", {}).items()}} for m, me in snapshot["markets"].items()}}
+                payload = script_json(mini)
+            else:
+                payload = "{}"
+            script = JS[slug].replace("__DATA__", payload).replace("__T__", script_json(t)).replace(
                 "__CFG__", script_json({"fees": C.FEE_RATES, "rank_bands": C.RANK_BANDS, "floor": C.FLOOR_MULTIPLIER}))
-            schema = {"@context": "https://schema.org", "@type": "WebApplication", "name": t[title_key],
-                      "url": base + tool_path, "applicationCategory": "UtilitiesApplication",
-                      "operatingSystem": "Any", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-                      "publisher": {"@type": "Organization", "name": C.AUTHOR}}
+            schema = [{"@context": "https://schema.org", "@type": "WebApplication", "name": t[title_key],
+                       "url": base + tool_path, "applicationCategory": "UtilitiesApplication",
+                       "operatingSystem": "Any", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+                       "publisher": {"@type": "Organization", "name": C.AUTHOR}},
+                      breadcrumb_schema(trail, base)]
             dest = out / tool_path.strip("/") / "index.html"
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(page(t[title_key], t[desc_key], tool_path, body, lang, base, script=script, schema=schema), encoding="utf-8")
             paths.append(tool_path)
 
         method_path = prefix + "/methodology/"
-        method_body = (f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["method_title"])}</span>'
+        method_body = (crumbs_html([("Home", prefix + "/"), (t["method_title"], None)])
+                       + f'<section class="hero"><div class="wrap"><span class="eyebrow">{esc(t["method_title"])}</span>'
                        f'<h1>{esc(t["method_title"])}</h1><p class="lead">{esc(t["method_desc"])}</p></div></section>'
                        f'<div class="wrap"><div class="card"><h2>1. {esc(t["source"])}</h2><p><a href="{esc(C.API_BASE)}">{esc(C.API_BASE)}</a></p>'
                        f'<h2>2. Rank bands</h2><p><code>{esc(bands_text())}</code></p>'
@@ -694,14 +766,16 @@ def build_site(snapshot: dict, out: Path) -> None:
         paths.append(method_path)
 
         markets_path = prefix + "/markets/"
-        markets_body = market_index(lang, snapshot)
+        markets_body = crumbs_html([("Home", prefix + "/"), (t["markets_title"], None)]) + market_index(lang, snapshot)
         dest = out / markets_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(page(t["markets_title"], t["markets_sub"], markets_path, markets_body, lang, base), encoding="utf-8")
         paths.append(markets_path)
 
         for market in C.MARKETS:
-            detail_body = market_detail(lang, market, snapshot, prefix, base)
+            detail_body = crumbs_html([("Home", prefix + "/"),
+                                       (t["markets_title"], prefix + "/markets/"),
+                                       (C.market_name(market, lang), None)]) + market_detail(lang, market, snapshot, prefix, base)
             if not detail_body:
                 continue
             detail_path = prefix + f"/markets/{market}/"
@@ -712,7 +786,7 @@ def build_site(snapshot: dict, out: Path) -> None:
 
         movers_data = rank_movers(snapshot)
         movers_path = prefix + "/movers/"
-        movers_body = movers_page(lang, snapshot, prefix, base, movers_data)
+        movers_body = crumbs_html([("Home", prefix + "/"), (t["movers_title"], None)]) + movers_page(lang, snapshot, prefix, base, movers_data)
 
         dest = out / movers_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -749,23 +823,31 @@ def build_site(snapshot: dict, out: Path) -> None:
         about_path = prefix + "/about/"
         dest = out / about_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(page(K.ABOUT[lang]["title"], K.ABOUT[lang]["sub"], about_path, about_page(lang, prefix, base), lang, base), encoding="utf-8")
+        about_body = crumbs_html([("Home", prefix + "/"), (K.ABOUT[lang]["title"], None)]) + about_page(lang, prefix, base)
+        dest.write_text(page(K.ABOUT[lang]["title"], K.ABOUT[lang]["sub"], about_path, about_body, lang, base), encoding="utf-8")
         paths.append(about_path)
 
         data_path = prefix + "/data/"
         dest = out / data_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(page(K.DATA[lang]["title"], K.DATA[lang]["sub"], data_path, data_page(lang, prefix, base), lang, base), encoding="utf-8")
+        data_body = crumbs_html([("Home", prefix + "/"), (K.DATA[lang]["title"], None)]) + data_page(lang, prefix, base)
+        dest.write_text(page(K.DATA[lang]["title"], K.DATA[lang]["sub"], data_path, data_body, lang, base), encoding="utf-8")
         paths.append(data_path)
 
         guides_path = prefix + "/guides/"
         dest = out / guides_path.strip("/") / "index.html"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(page(K.GUIDES[lang]["guides_title"], K.GUIDES[lang]["guides_sub"], guides_path, guides_index(lang, prefix, base), lang, base), encoding="utf-8")
+        guides_body = crumbs_html([("Home", prefix + "/"), (K.GUIDES[lang]["guides_title"], None)]) + guides_index(lang, prefix, base)
+        dest.write_text(page(K.GUIDES[lang]["guides_title"], K.GUIDES[lang]["guides_sub"], guides_path, guides_body, lang, base), encoding="utf-8")
         paths.append(guides_path)
 
         for slug in K.GUIDE_SLUGS:
             guide_body = guide_detail(lang, slug, prefix, base)
+            if guide_body:
+                g = K.GUIDES[lang][slug]
+                guide_body = crumbs_html([("Home", prefix + "/"),
+                                          (K.GUIDES[lang]["guides_title"], prefix + "/guides/"),
+                                          (g["title"], None)]) + guide_body
             if not guide_body:
                 continue
             guide_path = prefix + f"/guides/{slug}/"

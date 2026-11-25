@@ -63,7 +63,7 @@ class ToolkitTests(unittest.TestCase):
                         for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         pages = list(out.rglob("index.html"))
         # 薄 app 页仍然生成（可被内链访问），但 noindex 且不进 sitemap
-        indexable_per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
+        indexable_per_lang = 6 + 2 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
         self.assertEqual(len(pages), len(C.LANGS) * (indexable_per_lang + app_pages))
         root = ET.parse(out / "sitemap.xml").getroot()
         urls = [x.text for x in root.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
@@ -80,7 +80,7 @@ class ToolkitTests(unittest.TestCase):
         app_pages = sum(1 for m, v in self.snapshot["markets"].items()
                         for c, ch in v["charts"].items() for a in ch.get("trend", {}))
         self.assertIn(f"<lastmod>{self.snapshot['date']}</lastmod>", document)
-        per_lang = 6 + 1 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
+        per_lang = 6 + 2 + len(C.MARKETS) + 3 + len(K.GUIDE_SLUGS) + 1
         self.assertEqual(document.count("<lastmod>"), len(C.LANGS) * per_lang)
 
     def test_tool_prose(self):
@@ -90,6 +90,34 @@ class ToolkitTests(unittest.TestCase):
         self.assertIn("How this tool works", document)
         self.assertIn("Worked example", document)
         self.assertIn("Common questions", document)
+
+
+    def test_tool_pages_have_breadcrumbs_and_related_links(self):
+        out = self.build()
+        for slug in C.TOOLS:
+            document = (out / "tools" / slug / "index.html").read_text(encoding="utf-8")
+            self.assertIn('class="crumbs"', document, slug)
+            self.assertIn("BreadcrumbList", document, slug)
+            self.assertIn('class="rel"', document, slug)
+            self.assertIn("https://apprank.pages.dev/", document, slug)
+            others = [o for o in C.TOOLS if o != slug]
+            for other in others:
+                self.assertIn(f'/tools/{other}/', document, (slug, other))
+
+    def test_tool_payload_is_trimmed_per_tool(self):
+        out = self.build()
+        for slug in ("rank-change", "revenue-estimator", "fee-calculator"):
+            document = (out / "tools" / slug / "index.html").read_text(encoding="utf-8")
+            self.assertIn("const DATA={};", document, slug)
+            self.assertNotIn('"trend"', document, slug)
+        compare = (out / "tools/market-compare/index.html").read_text(encoding="utf-8")
+        self.assertIn('"markets"', compare)
+
+    def test_inner_pages_have_breadcrumbs(self):
+        out = self.build()
+        for path in ("methodology", "markets", "movers", "guides", "about", "data"):
+            document = (out / path / "index.html").read_text(encoding="utf-8")
+            self.assertIn('class="crumbs"', document, path)
 
     def test_market_pages(self):
         out = self.build()
